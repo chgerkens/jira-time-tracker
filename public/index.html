@@ -1,0 +1,1114 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jira Time Tracker</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⏱</text></svg>">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: #0f172a; font-family: 'Outfit', sans-serif; color: #e2e8f0; overflow-x: hidden; }
+  input:focus { border-color: rgba(34,211,238,0.5) !important; box-shadow: 0 0 0 3px rgba(34,211,238,0.1); }
+  ::selection { background: rgba(34,211,238,0.3); }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+  @keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 20px rgba(34,211,238,0.1); } 50% { box-shadow: 0 0 40px rgba(34,211,238,0.2); } }
+  @keyframes fade-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes slide-in { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: translateY(0); } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const STORAGE_KEY = "jira-time-entries";
+const FAVORITES_KEY = "jira-favorites";
+const SETTINGS_KEY = "jira-settings";
+
+// ─── Helpers ────────────────────────────────────────────────────────
+function formatDuration(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+}
+function formatHM(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+function toJiraFormat(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const parts = [];
+  if (h > 0) parts.push(`${h}h`);
+  if (m > 0) parts.push(`${m}m`);
+  return parts.join(" ") || "0m";
+}
+function todayKey() { return new Date().toISOString().slice(0, 10); }
+function generateId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+function toHHMM(date) {
+  return `${String(date.getHours()).padStart(2,"0")}:${String(date.getMinutes()).padStart(2,"0")}`;
+}
+function isoWeekKey(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  const jan4 = new Date(d.getFullYear(), 0, 4);
+  const startOfW1 = new Date(jan4);
+  startOfW1.setDate(jan4.getDate() - ((jan4.getDay() + 6) % 7));
+  const diff = d - startOfW1;
+  const week = Math.floor(diff / 604800000) + 1;
+  const year = d.getFullYear();
+  return { year, week, key: `${year}-W${String(week).padStart(2,"0")}` };
+}
+function calcEndTime(startTime, seconds) {
+  if (!startTime) return null;
+  const [h, m] = startTime.split(":").map(Number);
+  const totalMin = h * 60 + m + Math.round(seconds / 60);
+  return `${String(Math.floor(totalMin / 60) % 24).padStart(2,"0")}:${String(totalMin % 60).padStart(2,"0")}`;
+}
+function buildStartedISO(startTime, day) {
+  if (startTime) {
+    const d = new Date(`${day}T${startTime}:00`);
+    if (!isNaN(d.getTime())) return d.toISOString().replace("Z", "+0000");
+  }
+  return new Date(day + "T12:00:00.000+0000").toISOString().replace("Z", "+0000");
+}
+
+// ─── Storage (localStorage) ─────────────────────────────────────────
+function loadData(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch { return fallback; }
+}
+function saveData(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { console.error("Save failed:", e); }
+}
+
+// ─── Jira API ───────────────────────────────────────────────────────
+function jiraHeaders(settings) {
+  return {
+    Authorization: `Bearer ${settings.apiToken}`,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    // XSRF-Header werden vom Proxy gesetzt (server.js)
+  };
+}
+async function jiraFetch(settings, path, options = {}) {
+  const url = `/rest/api/2${path}`;
+  let res;
+  try {
+    res = await fetch(url, {
+      ...options,
+      headers: { ...jiraHeaders(settings), ...(options.headers || {}) },
+    });
+  } catch (e) {
+    if (e.message.includes("Failed to fetch") || e.message.includes("NetworkError")) {
+      throw new Error("Network error — probably CORS blocked. Use a proxy or check the domain.");
+    }
+    throw e;
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    let hint = "";
+    if (res.status === 401) hint = " → Check your Personal Access Token. Is it expired or revoked?";
+    if (res.status === 403) hint = " → Missing permissions or token expired.";
+    if (res.status === 404) hint = " → Domain or path not found. Is the URL correct?";
+    throw new Error(`HTTP ${res.status}${hint}${body ? ` | ${body.slice(0, 150)}` : ""}`);
+  }
+  return res.json();
+}
+async function searchTickets(settings, query) {
+  let jql;
+  if (/^[A-Za-z]+-\d+$/.test(query)) {
+    // Exakter Key z.B. "PROJ-123"
+    jql = `key = "${query}" ORDER BY updated DESC`;
+  } else if (/^[A-Za-z]+-/.test(query)) {
+    // Key prefix e.g. "PROJ-" or "PROJ-12" → latest issues of that project
+    const proj = query.split("-")[0];
+    jql = `project = "${proj}" ORDER BY updated DESC`;
+  } else {
+    // Freitext → Summary-Suche
+    jql = `summary ~ "${query}" ORDER BY updated DESC`;
+  }
+  const data = await jiraFetch(settings, `/search?jql=${encodeURIComponent(jql)}&maxResults=8&fields=key,summary,status,issuetype`);
+  return (data.issues || []).map(i => ({ key: i.key, summary: i.fields.summary, status: i.fields.status?.name, type: i.fields.issuetype?.name }));
+}
+async function postWorklog(settings, ticketKey, seconds, description, startedISO) {
+  const body = { timeSpentSeconds: seconds, started: startedISO };
+  if (description) body.comment = description;
+  const result = await jiraFetch(settings, `/issue/${ticketKey}/worklog`, { method: "POST", body: JSON.stringify(body) });
+  return result; // contains the new worklog ID
+}
+async function testConnection(settings) { return jiraFetch(settings, "/myself"); }
+
+function extractComment(comment) {
+  if (!comment) return "";
+  if (typeof comment === "string") return comment.trim();
+  // Fallback for ADF format
+  if (comment.content) return comment.content.map(block =>
+    (block.content || []).map(c => c.text || "").join("")
+  ).join(" ").trim();
+  return "";
+}
+
+async function fetchMyWorklogs(settings, date) {
+  // 1. Get current user — Cloud uses accountId, Server uses name/key
+  const me = await jiraFetch(settings, "/myself");
+  const myId = me.accountId || me.name || me.key;
+
+  // 2. Find issues with worklogs by current user on date
+  const jql = `worklogAuthor = currentUser() AND worklogDate = "${date}"`;
+  const data = await jiraFetch(settings, `/search?jql=${encodeURIComponent(jql)}&maxResults=50&fields=key,summary,status,issuetype`);
+  const issues = data.issues || [];
+
+  // 3. For each issue, fetch worklogs and filter by author + date
+  const results = [];
+  for (const issue of issues) {
+    const wlData = await jiraFetch(settings, `/issue/${issue.key}/worklog?maxResults=1000`);
+    const worklogs = (wlData.worklogs || []).filter(wl => {
+      const wlDate = (wl.started || "").slice(0, 10);
+      if (wlDate !== date) return false;
+      // Match author across all possible identifier fields
+      const author = wl.author || {};
+      return author.accountId === myId || author.name === myId || author.key === myId;
+    });
+    for (const wl of worklogs) {
+      results.push({
+        jiraWorklogId: wl.id,
+        ticket: issue.key,
+        summary: issue.fields.summary,
+        status: issue.fields.status?.name,
+        seconds: wl.timeSpentSeconds || 0,
+        description: extractComment(wl.comment),
+        started: wl.started,
+      });
+    }
+  }
+  return results;
+}
+
+// ─── Styles ─────────────────────────────────────────────────────────
+const inputStyle = {
+  padding: "12px 16px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)",
+  borderRadius: "10px", color: "#e2e8f0", fontSize: "0.95rem", fontFamily: "'Outfit', sans-serif",
+  outline: "none", transition: "border-color 0.2s, box-shadow 0.2s", boxSizing: "border-box",
+};
+const monoInputStyle = { ...inputStyle, fontFamily: "'JetBrains Mono', monospace" };
+
+// ─── Components ─────────────────────────────────────────────────────
+function TimerDisplay({ seconds, isRunning }) {
+  return React.createElement("div", { style: {
+    fontFamily: "'JetBrains Mono', monospace", fontSize: "3.2rem", fontWeight: 700,
+    letterSpacing: "0.08em", color: isRunning ? "#22d3ee" : "#94a3b8",
+    textShadow: isRunning ? "0 0 30px rgba(34,211,238,0.3)" : "none",
+    transition: "all 0.4s ease", lineHeight: 1,
+  }}, formatDuration(seconds));
+}
+
+function TicketInput({ value, onChange, onSubmit, placeholder, favorites, onSelectFavorite, jiraSettings, onSelectJira }) {
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [jiraResults, setJiraResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const debounceRef = useRef(null);
+  const connected = !!jiraSettings?.apiToken;
+
+  useEffect(() => {
+    if (!connected || value.length < 2) { setJiraResults([]); return; }
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      setSearching(true);
+      try { setJiraResults(await searchTickets(jiraSettings, value)); } catch { setJiraResults([]); }
+      setSearching(false);
+    }, 400);
+    return () => clearTimeout(debounceRef.current);
+  }, [value, connected]);
+
+  const favFiltered = favorites.filter(f => f.toLowerCase().includes(value.toLowerCase()) && value.length > 0);
+  const hasResults = favFiltered.length > 0 || jiraResults.length > 0 || searching;
+
+  return (
+    <div style={{ position: "relative", flex: 1 }}>
+      <div style={{ position: "relative" }}>
+        <input type="text" value={value}
+          onChange={e => { onChange(e.target.value.toUpperCase()); setShowSuggestions(true); }}
+          onKeyDown={e => { if (e.key === "Enter") { onSubmit(); setShowSuggestions(false); } }}
+          onFocus={() => setShowSuggestions(true)}
+          onBlur={() => setTimeout(() => setShowSuggestions(false), 250)}
+          placeholder={placeholder}
+          style={{ ...monoInputStyle, width: "100%", paddingRight: connected ? "36px" : "16px" }}
+        />
+        {connected && <div style={{
+          position: "absolute", right: "12px", top: "50%", transform: "translateY(-50%)",
+          width: "7px", height: "7px", borderRadius: "50%", background: "#22c55e",
+          boxShadow: "0 0 6px rgba(34,197,94,0.4)",
+        }} title="Jira connected" />}
+      </div>
+      {showSuggestions && hasResults && (
+        <div style={{
+          position: "absolute", top: "100%", left: 0, right: 0, background: "#1e293b",
+          border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", marginTop: "4px",
+          zIndex: 20, overflow: "hidden", maxHeight: "280px", overflowY: "auto",
+          boxShadow: "0 12px 40px rgba(0,0,0,0.4)",
+        }}>
+          {favFiltered.length > 0 && <>
+            <div style={{ padding: "8px 14px 4px", fontSize: "0.65rem", color: "#475569", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 600 }}>★ Favorites</div>
+            {favFiltered.map(f => (
+              <div key={`fav-${f}`} onMouseDown={() => { onSelectFavorite(f); setShowSuggestions(false); }}
+                style={{ padding: "10px 14px", cursor: "pointer", fontSize: "0.85rem", fontFamily: "'JetBrains Mono', monospace", color: "#94a3b8", borderBottom: "1px solid rgba(255,255,255,0.04)" }}
+                onMouseOver={e => { e.currentTarget.style.background = "rgba(34,211,238,0.08)"; e.currentTarget.style.color = "#22d3ee"; }}
+                onMouseOut={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#94a3b8"; }}
+              >{f}</div>
+            ))}
+          </>}
+          {connected && (jiraResults.length > 0 || searching) && <>
+            <div style={{ padding: "8px 14px 4px", fontSize: "0.65rem", color: "#475569", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 600, borderTop: favFiltered.length > 0 ? "1px solid rgba(255,255,255,0.06)" : "none" }}>
+              {searching ? "Searching Jira..." : "Jira Tickets"}
+            </div>
+            {jiraResults.map(t => (
+              <div key={t.key} onMouseDown={() => { onSelectJira ? onSelectJira(t) : onSelectFavorite(t.key); setShowSuggestions(false); }}
+                style={{ padding: "10px 14px", cursor: "pointer", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", alignItems: "center", gap: "10px" }}
+                onMouseOver={e => e.currentTarget.style.background = "rgba(34,211,238,0.08)"}
+                onMouseOut={e => e.currentTarget.style.background = "transparent"}
+              >
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "0.85rem", color: "#22d3ee", fontWeight: 600, whiteSpace: "nowrap" }}>{t.key}</span>
+                <span style={{ fontSize: "0.8rem", color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{t.summary}</span>
+                {t.status && <span style={{
+                  fontSize: "0.62rem", padding: "2px 8px", borderRadius: "10px",
+                  background: t.status === "Done" ? "rgba(34,197,94,0.15)" : t.status === "In Progress" ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.06)",
+                  color: t.status === "Done" ? "#22c55e" : t.status === "In Progress" ? "#3b82f6" : "#64748b", whiteSpace: "nowrap",
+                }}>{t.status}</span>}
+              </div>
+            ))}
+          </>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SyncBadge({ status }) {
+  const cfg = {
+    local: { bg: "rgba(255,255,255,0.05)", color: "#475569", label: "Local" },
+    syncing: { bg: "rgba(59,130,246,0.15)", color: "#3b82f6", label: "⟳" },
+    synced: { bg: "rgba(34,197,94,0.12)", color: "#22c55e", label: "✓ Jira" },
+    error: { bg: "rgba(239,68,68,0.12)", color: "#ef4444", label: "✗ Error" },
+  }[status] || { bg: "transparent", color: "#475569", label: "" };
+  return <span style={{ fontSize: "0.62rem", padding: "3px 8px", borderRadius: "8px", background: cfg.bg, color: cfg.color, fontWeight: 600, fontFamily: "'JetBrains Mono', monospace", whiteSpace: "nowrap" }}>{cfg.label}</span>;
+}
+
+function EntryRow({ entry, onDelete, onToggleFavorite, isFavorite, onSync, onUpdateEntry, jiraConnected }) {
+  const [editing, setEditing] = useState(false);
+  const [editForm, setEditForm] = useState({});
+
+  const startEdit = () => {
+    setEditForm({
+      ticket: entry.ticket,
+      description: entry.description || "",
+      startTime: entry.startTime || "",
+      h: String(Math.floor(entry.seconds / 3600)),
+      m: String(Math.floor((entry.seconds % 3600) / 60)),
+    });
+    setEditing(true);
+  };
+
+  const saveEdit = () => {
+    const totalSec = (parseInt(editForm.h) || 0) * 3600 + (parseInt(editForm.m) || 0) * 60;
+    if (!editForm.ticket.trim() || totalSec < 60) return;
+    const changed = editForm.ticket.trim().toUpperCase() !== entry.ticket
+      || editForm.description.trim() !== (entry.description || "")
+      || (editForm.startTime || null) !== entry.startTime
+      || totalSec !== entry.seconds;
+    const updated = {
+      ...entry,
+      ticket: editForm.ticket.trim().toUpperCase(),
+      description: editForm.description.trim(),
+      startTime: editForm.startTime || null,
+      seconds: totalSec,
+      ...(changed && entry.syncStatus !== "local" ? { syncStatus: "local", jiraWorklogId: null } : {}),
+    };
+    onUpdateEntry(updated);
+    setEditing(false);
+  };
+
+  // Link direkt auf Worklog (falls ID vorhanden), sonst auf Ticket-Seite
+  let jiraUrl = null;
+  if (window.JIRA_BASE_URL) {
+    if (entry.jiraWorklogId) {
+      jiraUrl = `${window.JIRA_BASE_URL}/browse/${entry.ticket}?focusedWorklogId=${entry.jiraWorklogId}&page=com.atlassian.jira.plugin.system.issuetabpanels:worklog-tabpanel#worklog-${entry.jiraWorklogId}`;
+    } else {
+      jiraUrl = `${window.JIRA_BASE_URL}/browse/${entry.ticket}`;
+    }
+  }
+
+  const rowBg = editing ? "rgba(34,211,238,0.03)" : "rgba(255,255,255,0.02)";
+
+  return (
+    <div style={{ borderRadius: "10px", border: editing ? "1px solid rgba(34,211,238,0.2)" : "1px solid rgba(255,255,255,0.05)", overflow: "hidden", transition: "border-color 0.2s" }}>
+      {/* ── Summary row ── */}
+      <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "14px 16px", background: rowBg, transition: "background 0.2s", flexWrap: "wrap", minWidth: 0 }}
+        onMouseOver={e => { if (!editing) e.currentTarget.style.background = "rgba(255,255,255,0.04)"; }}
+        onMouseOut={e => { e.currentTarget.style.background = rowBg; }}
+      >
+        <button onClick={() => onToggleFavorite(entry.ticket)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "0.9rem", padding: "2px", opacity: isFavorite ? 1 : 0.2, color: "#f59e0b" }}>★</button>
+        <div style={{ display: "flex", flexDirection: "column", minWidth: "90px" }}>
+          {jiraUrl ? (
+            <a href={jiraUrl} target="_blank" rel="noopener noreferrer"
+              style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "0.85rem", fontWeight: 600, color: "#22d3ee", textDecoration: "none" }}
+              onMouseOver={e => e.currentTarget.style.textDecoration = "underline"}
+              onMouseOut={e => e.currentTarget.style.textDecoration = "none"}
+              title={entry.jiraWorklogId ? "Open worklog in Jira" : "Open ticket in Jira"}
+            >{entry.ticket}</a>
+          ) : (
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "0.85rem", fontWeight: 600, color: "#22d3ee" }}>{entry.ticket}</span>
+          )}
+          {entry.issueSummary && (
+            <span style={{ fontSize: "0.7rem", color: "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "220px" }}
+              title={entry.issueSummary}>{entry.issueSummary}</span>
+          )}
+        </div>
+        {entry.description
+          ? <div style={{ flex: 1, minWidth: 0, fontSize: "0.82rem", color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.description}</div>
+          : <div style={{ flex: 1 }} />}
+        <SyncBadge status={entry.syncStatus || "local"} />
+        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "0.75rem", color: entry.startTime ? "#64748b" : "#2a3a50", whiteSpace: "nowrap" }}>
+          {entry.startTime ? `${entry.startTime} – ${calcEndTime(entry.startTime, entry.seconds)}` : "--:--"}
+        </span>
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "0.85rem", fontWeight: 600, color: "#e2e8f0", minWidth: "60px", textAlign: "right" }}>{formatHM(entry.seconds)}</div>
+        {jiraConnected && entry.syncStatus !== "synced" && (
+          <button onClick={() => onSync(entry)}
+            style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.25)", borderRadius: "6px", padding: "5px 9px", cursor: "pointer", fontSize: "0.7rem", color: "#3b82f6", fontFamily: "'JetBrains Mono', monospace", whiteSpace: "nowrap" }}
+            onMouseOver={e => e.currentTarget.style.background = "rgba(59,130,246,0.2)"}
+            onMouseOut={e => e.currentTarget.style.background = "rgba(59,130,246,0.1)"}
+          >↑ Push</button>
+        )}
+        <button onClick={editing ? () => setEditing(false) : startEdit}
+          title={editing ? "Cancel editing" : "Edit entry"}
+          style={{ background: editing ? "rgba(34,211,238,0.12)" : "none", border: editing ? "1px solid rgba(34,211,238,0.25)" : "none", borderRadius: "6px", padding: "4px 7px", cursor: "pointer", fontSize: "0.85rem", color: editing ? "#22d3ee" : "#334155", transition: "all 0.15s" }}
+          onMouseOver={e => { if (!editing) e.currentTarget.style.color = "#94a3b8"; }}
+          onMouseOut={e => { if (!editing) e.currentTarget.style.color = "#334155"; }}
+        >✎</button>
+        <button onClick={() => onDelete(entry.id)}
+          style={{ background: "none", border: "none", cursor: "pointer", fontSize: "1rem", color: "#334155", padding: "2px 4px" }}
+          onMouseOver={e => e.target.style.color = "#ef4444"} onMouseOut={e => e.target.style.color = "#334155"}
+        >×</button>
+      </div>
+
+      {/* ── Edit panel ── */}
+      {editing && (
+        <div style={{ padding: "14px 16px", background: "rgba(34,211,238,0.02)", borderTop: "1px solid rgba(34,211,238,0.1)", display: "flex", flexDirection: "column", gap: "10px" }}>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+            <input type="text" value={editForm.ticket}
+              onChange={e => setEditForm(f => ({ ...f, ticket: e.target.value.toUpperCase() }))}
+              onKeyDown={e => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") setEditing(false); }}
+              placeholder="PROJ-123"
+              style={{ ...monoInputStyle, width: "130px", padding: "8px 12px", fontSize: "0.88rem" }} />
+            <input type="text" value={editForm.description}
+              onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))}
+              onKeyDown={e => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") setEditing(false); }}
+              placeholder="Description (optional)"
+              style={{ ...inputStyle, flex: 1, padding: "8px 12px", fontSize: "0.88rem" }} />
+          </div>
+          <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: "5px", alignItems: "center" }}>
+              <input type="time" value={editForm.startTime}
+                onChange={e => setEditForm(f => ({ ...f, startTime: e.target.value }))}
+                style={{ ...monoInputStyle, width: "110px", padding: "6px 10px", fontSize: "0.85rem", colorScheme: "dark" }} />
+              <span style={{ fontSize: "0.72rem", color: "#475569" }}>Start</span>
+            </div>
+            <div style={{ width: "1px", height: "20px", background: "rgba(255,255,255,0.06)" }} />
+            <div style={{ display: "flex", gap: "5px", alignItems: "center" }}>
+              <input type="number" min="0" max="23" value={editForm.h}
+                onChange={e => setEditForm(f => ({ ...f, h: e.target.value }))}
+                onKeyDown={e => { if (e.key === "Enter") saveEdit(); }}
+                style={{ ...monoInputStyle, width: "76px", textAlign: "center", padding: "6px 8px", fontSize: "0.9rem" }} />
+              <span style={{ fontSize: "0.8rem", color: "#475569" }}>h</span>
+            </div>
+            <div style={{ display: "flex", gap: "5px", alignItems: "center" }}>
+              <input type="number" min="0" max="59" step="15" value={editForm.m}
+                onChange={e => setEditForm(f => ({ ...f, m: e.target.value }))}
+                onKeyDown={e => { if (e.key === "Enter") saveEdit(); }}
+                style={{ ...monoInputStyle, width: "76px", textAlign: "center", padding: "6px 8px", fontSize: "0.9rem" }} />
+              <span style={{ fontSize: "0.8rem", color: "#475569" }}>m</span>
+            </div>
+            <div style={{ flex: 1 }} />
+            {entry.syncStatus === "synced" && (
+              <span style={{ fontSize: "0.72rem", color: "#f59e0b" }}>⚠ Already synced to Jira — sync status will be reset</span>
+            )}
+            <button onClick={() => setEditing(false)}
+              style={{ padding: "7px 14px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.1)", background: "transparent", color: "#64748b", cursor: "pointer", fontSize: "0.82rem", fontFamily: "'Outfit', sans-serif" }}
+              onMouseOver={e => e.currentTarget.style.borderColor = "rgba(255,255,255,0.2)"}
+              onMouseOut={e => e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)"}
+            >Cancel</button>
+            <button onClick={saveEdit}
+              disabled={!editForm.ticket.trim() || ((parseInt(editForm.h)||0)*60+(parseInt(editForm.m)||0)) < 1}
+              style={{ padding: "7px 18px", borderRadius: "8px", border: "none", background: "linear-gradient(135deg, #0891b2, #22d3ee)", color: "#0f172a", cursor: "pointer", fontSize: "0.82rem", fontWeight: 600, fontFamily: "'Outfit', sans-serif", opacity: (!editForm.ticket.trim() || ((parseInt(editForm.h)||0)*60+(parseInt(editForm.m)||0)) < 1) ? 0.4 : 1 }}
+            >Save</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SettingsPanel({ settings, onSave, onClose }) {
+  const [form, setForm] = useState({ ...settings });
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+
+  const handleTest = async () => {
+    setTesting(true); setTestResult(null);
+    try {
+      const user = await testConnection(form);
+      setTestResult({ ok: true, msg: `Connected as ${user.displayName || user.name || "?"} (${user.key || user.name || ""})` });
+    } catch (e) {
+      setTestResult({ ok: false, msg: e.message });
+    }
+    setTesting(false);
+  };
+
+  const canSave = !!form.apiToken;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#1e293b", borderRadius: "18px", padding: "32px", border: "1px solid rgba(255,255,255,0.08)", maxWidth: "520px", width: "100%", boxShadow: "0 24px 80px rgba(0,0,0,0.5)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
+          <h2 style={{ fontSize: "1.15rem", fontWeight: 700, color: "#f1f5f9" }}>Jira Connection</h2>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#64748b", fontSize: "1.3rem", cursor: "pointer" }}>×</button>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div>
+            <label style={{ fontSize: "0.78rem", color: "#94a3b8", display: "block", marginBottom: "6px", fontWeight: 500 }}>Personal Access Token</label>
+            <input type="password" value={form.apiToken || ""} onChange={e => setForm({ ...form, apiToken: e.target.value })}
+              placeholder="PAT Token" style={{ ...inputStyle, width: "100%" }} />
+            <a href="https://confluence.atlassian.com/enterprise/using-personal-access-tokens-1026032365.html" target="_blank" rel="noopener noreferrer"
+              style={{ fontSize: "0.72rem", color: "#0891b2", marginTop: "6px", display: "inline-block", textDecoration: "none" }}>→ Create PAT (Profile → Personal Access Tokens)</a>
+          </div>
+
+          <div style={{ padding: "12px 16px", borderRadius: "10px", fontSize: "0.76rem", background: "rgba(34,197,94,0.06)", border: "1px solid rgba(34,197,94,0.12)", color: "#94a3b8", lineHeight: 1.6 }}>
+            API calls go through the integrated proxy to Jira Server — no CORS, no XSRF.
+          </div>
+
+          {testResult && (
+            <div style={{
+              padding: "12px 16px", borderRadius: "10px", fontSize: "0.8rem", lineHeight: 1.5,
+              background: testResult.ok ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.08)",
+              border: `1px solid ${testResult.ok ? "rgba(34,197,94,0.2)" : "rgba(239,68,68,0.2)"}`,
+              color: testResult.ok ? "#22c55e" : "#ef4444", wordBreak: "break-word",
+            }}>{testResult.msg}</div>
+          )}
+
+          <div style={{ display: "flex", gap: "10px", marginTop: "8px" }}>
+            <button onClick={handleTest} disabled={testing || !canSave} style={{ flex: 1, padding: "12px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "#94a3b8", cursor: "pointer", fontSize: "0.88rem", fontWeight: 500, opacity: (testing || !canSave) ? 0.4 : 1 }}>{testing ? "Testing..." : "Test connection"}</button>
+            <button onClick={() => { onSave(form); onClose(); }} disabled={!canSave} style={{ flex: 1, padding: "12px", borderRadius: "10px", border: "none", background: "linear-gradient(135deg, #0891b2, #22d3ee)", color: "#0f172a", cursor: "pointer", fontSize: "0.88rem", fontWeight: 600, opacity: !canSave ? 0.4 : 1 }}>Save</button>
+          </div>
+          {settings.apiToken && <button onClick={() => { onSave({ apiToken: "" }); onClose(); }} style={{ padding: "10px", borderRadius: "10px", border: "1px solid rgba(239,68,68,0.2)", background: "rgba(239,68,68,0.05)", color: "#ef4444", cursor: "pointer", fontSize: "0.82rem" }}>Disconnect</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ImportPanel({ settings, date, existingEntries, onImport, onClose }) {
+  const [worklogs, setWorklogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [selected, setSelected] = useState(new Set());
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const wls = await fetchMyWorklogs(settings, date);
+        setWorklogs(wls);
+        // Pre-select worklogs not already imported
+        const existingIds = new Set((existingEntries || []).map(e => e.jiraWorklogId).filter(Boolean));
+        const newIds = new Set(wls.filter(w => !existingIds.has(w.jiraWorklogId)).map(w => w.jiraWorklogId));
+        setSelected(newIds);
+      } catch (e) {
+        setError(e.message);
+      }
+      setLoading(false);
+    })();
+  }, []);
+
+  const existingIds = new Set((existingEntries || []).map(e => e.jiraWorklogId).filter(Boolean));
+
+  const toggleSelect = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    const importable = worklogs.filter(w => !existingIds.has(w.jiraWorklogId));
+    if (selected.size === importable.length) setSelected(new Set());
+    else setSelected(new Set(importable.map(w => w.jiraWorklogId)));
+  };
+
+  const handleImport = () => {
+    const toImport = worklogs.filter(w => selected.has(w.jiraWorklogId));
+    onImport(toImport);
+    onClose();
+  };
+
+  const totalSelected = worklogs.filter(w => selected.has(w.jiraWorklogId)).reduce((s, w) => s + w.seconds, 0);
+  const totalAll = worklogs.reduce((s, w) => s + w.seconds, 0);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#1e293b", borderRadius: "18px", padding: "28px", border: "1px solid rgba(255,255,255,0.08)", maxWidth: "640px", width: "100%", maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 80px rgba(0,0,0,0.5)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px", flexShrink: 0 }}>
+          <div>
+            <h2 style={{ fontSize: "1.1rem", fontWeight: 700, color: "#f1f5f9" }}>Import worklogs</h2>
+            <p style={{ fontSize: "0.78rem", color: "#64748b", marginTop: "4px" }}>{date} · {worklogs.length} entries found{totalAll > 0 ? ` · Total: ${formatHM(totalAll)}` : ""}</p>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#64748b", fontSize: "1.3rem", cursor: "pointer" }}>×</button>
+        </div>
+
+        <div style={{ flex: 1, overflowY: "auto", marginBottom: "16px" }}>
+          {loading && <div style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
+            <div style={{ fontSize: "1.2rem", marginBottom: "8px" }}>⟳</div>
+            Loading worklogs from Jira...
+          </div>}
+
+          {error && <div style={{ padding: "16px", borderRadius: "10px", background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.2)", color: "#ef4444", fontSize: "0.85rem" }}>
+            Error: {error}
+          </div>}
+
+          {!loading && !error && worklogs.length === 0 && (
+            <div style={{ textAlign: "center", padding: "40px", color: "#475569", fontSize: "0.9rem" }}>
+              <div style={{ fontSize: "1.5rem", marginBottom: "8px", opacity: 0.4 }}>📭</div>
+              No worklogs found for this day.
+            </div>
+          )}
+
+          {!loading && worklogs.length > 0 && <>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px", paddingBottom: "10px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+              <button onClick={toggleAll} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "0.78rem", color: "#22d3ee", fontWeight: 500 }}>
+                {selected.size === worklogs.filter(w => !existingIds.has(w.jiraWorklogId)).length ? "Deselect all" : "Select all"}
+              </button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              {worklogs.map(wl => {
+                const alreadyImported = existingIds.has(wl.jiraWorklogId);
+                const isSelected = selected.has(wl.jiraWorklogId);
+                return (
+                  <div key={wl.jiraWorklogId}
+                    onClick={() => !alreadyImported && toggleSelect(wl.jiraWorklogId)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: "10px", padding: "12px 14px",
+                      borderRadius: "10px", cursor: alreadyImported ? "default" : "pointer",
+                      background: alreadyImported ? "rgba(34,197,94,0.04)" : isSelected ? "rgba(34,211,238,0.06)" : "rgba(255,255,255,0.02)",
+                      border: "1px solid",
+                      borderColor: alreadyImported ? "rgba(34,197,94,0.15)" : isSelected ? "rgba(34,211,238,0.2)" : "rgba(255,255,255,0.05)",
+                      opacity: alreadyImported ? 0.6 : 1,
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    <div style={{
+                      width: "20px", height: "20px", borderRadius: "5px", flexShrink: 0,
+                      border: "2px solid",
+                      borderColor: alreadyImported ? "#22c55e" : isSelected ? "#22d3ee" : "rgba(255,255,255,0.15)",
+                      background: alreadyImported ? "rgba(34,197,94,0.2)" : isSelected ? "rgba(34,211,238,0.15)" : "transparent",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: "0.7rem", color: alreadyImported ? "#22c55e" : "#22d3ee",
+                    }}>
+                      {(alreadyImported || isSelected) && "✓"}
+                    </div>
+
+                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "0.82rem", fontWeight: 600, color: "#22d3ee", minWidth: "90px" }}>
+                      {wl.ticket}
+                    </div>
+
+                    <div style={{ flex: 1, overflow: "hidden" }}>
+                      <div style={{ fontSize: "0.8rem", color: "#94a3b8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {wl.summary}
+                      </div>
+                      {wl.description && (
+                        <div style={{ fontSize: "0.72rem", color: "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: "2px" }}>
+                          {wl.description}
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "0.82rem", fontWeight: 600, color: "#e2e8f0", whiteSpace: "nowrap" }}>
+                      {formatHM(wl.seconds)}
+                    </div>
+
+                    {alreadyImported && <span style={{ fontSize: "0.6rem", color: "#22c55e", whiteSpace: "nowrap", fontWeight: 600 }}>imported</span>}
+                  </div>
+                );
+              })}
+            </div>
+          </>}
+        </div>
+
+        {!loading && worklogs.length > 0 && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0, paddingTop: "16px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+            <span style={{ fontSize: "0.82rem", color: "#64748b" }}>
+              {selected.size} selected{selected.size > 0 ? ` · ${formatHM(totalSelected)}` : ""}
+            </span>
+            <button onClick={handleImport} disabled={selected.size === 0}
+              style={{
+                padding: "12px 24px", borderRadius: "10px", border: "none",
+                background: selected.size > 0 ? "linear-gradient(135deg, #0891b2, #22d3ee)" : "rgba(255,255,255,0.05)",
+                color: selected.size > 0 ? "#0f172a" : "#475569",
+                cursor: selected.size > 0 ? "pointer" : "not-allowed",
+                fontSize: "0.9rem", fontWeight: 600,
+              }}>
+              ↓ Import {selected.size} {selected.size === 1 ? "entry" : "entries"}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Main App ───────────────────────────────────────────────────────
+function App() {
+  const [entries, setEntries] = useState(() => loadData(STORAGE_KEY, {}));
+  const [favorites, setFavorites] = useState(() => loadData(FAVORITES_KEY, []));
+  const [settings, setSettings] = useState(() => loadData(SETTINGS_KEY, { apiToken: "" }));
+  const [ticket, setTicket] = useState("");
+  const [description, setDescription] = useState("");
+  const [isRunning, setIsRunning] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const [activeTicket, setActiveTicket] = useState("");
+  const [activeDesc, setActiveDesc] = useState("");
+  const [manualH, setManualH] = useState("");
+  const [manualM, setManualM] = useState("");
+  const [manualTicket, setManualTicket] = useState("");
+  const [manualDesc, setManualDesc] = useState("");
+  const [manualStartTime, setManualStartTime] = useState("");
+  const [ticketSummary, setTicketSummary] = useState("");
+  const [manualTicketSummary, setManualTicketSummary] = useState("");
+  const [activeTicketSummary, setActiveTicketSummary] = useState("");
+  const [selectedDate, setSelectedDate] = useState(todayKey());
+  const [copiedAll, setCopiedAll] = useState(false);
+  const [copiedWeek, setCopiedWeek] = useState(null);
+  const [tab, setTab] = useState("manual");
+  const [showSettings, setShowSettings] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [syncingAll, setSyncingAll] = useState(false);
+  const [toast, setToast] = useState(null);
+  const intervalRef = useRef(null);
+  const startTimeRef = useRef(null);
+  const elapsedAtStartRef = useRef(0);
+  const timerStartedHHMMRef = useRef(null);
+
+  const jiraConnected = !!settings.apiToken;
+  const showToast = (msg, type = "success") => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); };
+
+  // Timer
+  useEffect(() => {
+    if (isRunning) {
+      startTimeRef.current = Date.now();
+      elapsedAtStartRef.current = elapsed;
+      intervalRef.current = setInterval(() => {
+        setElapsed(elapsedAtStartRef.current + Math.floor((Date.now() - startTimeRef.current) / 1000));
+      }, 250);
+    } else { clearInterval(intervalRef.current); }
+    return () => clearInterval(intervalRef.current);
+  }, [isRunning]);
+
+  const persistEntries = useCallback((ne) => { setEntries(ne); saveData(STORAGE_KEY, ne); }, []);
+
+  const toggleFavorite = useCallback((ticketId) => {
+    setFavorites(prev => {
+      const next = prev.includes(ticketId) ? prev.filter(f => f !== ticketId) : [...prev, ticketId];
+      saveData(FAVORITES_KEY, next); return next;
+    });
+  }, []);
+
+  const saveSettings_ = (s) => { setSettings(s); saveData(SETTINGS_KEY, s); };
+
+  const updateEntrySync = (entryId, syncStatus, worklogId = null) => {
+    setEntries(prev => {
+      const ne = { ...prev };
+      for (const day of Object.keys(ne)) {
+        ne[day] = ne[day].map(e => {
+          if (e.id === entryId) {
+            const updated = { ...e, syncStatus };
+            if (worklogId) updated.jiraWorklogId = worklogId;
+            return updated;
+          }
+          return e;
+        });
+      }
+      saveData(STORAGE_KEY, ne); return ne;
+    });
+  };
+
+
+  const startTimer = () => {
+    if (!ticket.trim()) return;
+    setActiveTicket(ticket.trim()); setActiveDesc(description.trim()); setActiveTicketSummary(ticketSummary);
+    timerStartedHHMMRef.current = toHHMM(new Date());
+    setIsRunning(true); setElapsed(0);
+  };
+
+  const stopTimer = () => {
+    setIsRunning(false);
+    if (elapsed < 1) return;
+    const entry = { id: generateId(), ticket: activeTicket, issueSummary: activeTicketSummary || null, description: activeDesc, seconds: elapsed, startTime: timerStartedHHMMRef.current || null, timestamp: Date.now(), syncStatus: "local" };
+    const ne = { ...entries }; if (!ne[todayKey()]) ne[todayKey()] = []; ne[todayKey()] = [...ne[todayKey()], entry];
+    persistEntries(ne);
+    setTicket(""); setTicketSummary(""); setDescription(""); setElapsed(0); setActiveTicket(""); setActiveDesc(""); setActiveTicketSummary(""); timerStartedHHMMRef.current = null;
+  };
+
+  const addManual = () => {
+    if (!manualTicket.trim()) return;
+    const totalSec = (parseInt(manualH) || 0) * 3600 + (parseInt(manualM) || 0) * 60;
+    if (totalSec < 60) return;
+    const entry = { id: generateId(), ticket: manualTicket.trim(), issueSummary: manualTicketSummary || null, description: manualDesc.trim(), seconds: totalSec, startTime: manualStartTime || null, timestamp: Date.now(), syncStatus: "local" };
+    const ne = { ...entries }; if (!ne[selectedDate]) ne[selectedDate] = []; ne[selectedDate] = [...ne[selectedDate], entry];
+    persistEntries(ne);
+    setManualH(""); setManualM(""); setManualTicket(""); setManualTicketSummary(""); setManualDesc(""); setManualStartTime("");
+  };
+
+  const syncEntry = async (entry) => {
+    if (!jiraConnected) return;
+    updateEntrySync(entry.id, "syncing");
+    try {
+      const day = Object.keys(entries).find(d => entries[d].some(e => e.id === entry.id)) || todayKey();
+      const result = await postWorklog(settings, entry.ticket, entry.seconds, entry.description, buildStartedISO(entry.startTime, day));
+      updateEntrySync(entry.id, "synced", result.id);
+      showToast(`${entry.ticket}: ${toJiraFormat(entry.seconds)} → Jira`);
+    } catch (e) { updateEntrySync(entry.id, "error"); showToast(`Error: ${e.message.slice(0, 80)}`, "error"); }
+  };
+
+  const syncAllUnsynced = async () => {
+    if (!jiraConnected) return;
+    const unsynced = (entries[selectedDate] || []).filter(e => e.syncStatus !== "synced");
+    if (!unsynced.length) { showToast("All synced ✓"); return; }
+    setSyncingAll(true);
+    let ok = 0, fail = 0;
+    for (const entry of unsynced) {
+      try {
+        updateEntrySync(entry.id, "syncing");
+        const result = await postWorklog(settings, entry.ticket, entry.seconds, entry.description, buildStartedISO(entry.startTime, selectedDate));
+        updateEntrySync(entry.id, "synced", result.id);
+        ok++;
+      }
+      catch { updateEntrySync(entry.id, "error"); fail++; }
+    }
+    setSyncingAll(false);
+    showToast(`${ok} logged${fail > 0 ? `, ${fail} failed` : ""}`, fail > 0 ? "error" : "success");
+  };
+
+  const updateEntry = (updatedEntry) => {
+    setEntries(prev => {
+      const ne = { ...prev };
+      for (const day of Object.keys(ne)) {
+        ne[day] = ne[day].map(e => e.id === updatedEntry.id ? updatedEntry : e);
+      }
+      saveData(STORAGE_KEY, ne);
+      return ne;
+    });
+  };
+
+  const deleteEntry = (id) => {
+    const ne = { ...entries };
+    for (const day of Object.keys(ne)) { ne[day] = ne[day].filter(e => e.id !== id); if (!ne[day].length) delete ne[day]; }
+    persistEntries(ne);
+  };
+
+  const importWorklogs = (worklogs) => {
+    const ne = { ...entries };
+    if (!ne[selectedDate]) ne[selectedDate] = [];
+    let count = 0;
+    for (const wl of worklogs) {
+      const entry = {
+        id: generateId(),
+        jiraWorklogId: wl.jiraWorklogId,
+        ticket: wl.ticket,
+        description: wl.description || wl.summary || "",
+        seconds: wl.seconds,
+        timestamp: Date.now(),
+        syncStatus: "synced",
+      };
+      ne[selectedDate] = [...ne[selectedDate], entry];
+      count++;
+    }
+    persistEntries(ne);
+    showToast(`${count} worklog${count !== 1 ? "s" : ""} imported`);
+  };
+
+  const dayEntries = entries[selectedDate] || [];
+  const dayTotal = dayEntries.reduce((s, e) => s + e.seconds, 0);
+  const unsyncedCount = dayEntries.filter(e => e.syncStatus !== "synced").length;
+  const availableDays = [...new Set([...Object.keys(entries), selectedDate])].sort().reverse();
+  const copyAllForDay = () => {
+    navigator.clipboard.writeText(dayEntries.map(e => `${e.ticket}: ${toJiraFormat(e.seconds)}${e.description ? ` — ${e.description}` : ""}`).join("\n"));
+    setCopiedAll(true); setTimeout(() => setCopiedAll(false), 2000);
+  };
+
+  return (
+    <>
+      {toast && <div style={{ position: "fixed", top: "20px", left: "50%", transform: "translateX(-50%)", zIndex: 200, padding: "12px 24px", borderRadius: "12px", background: toast.type === "error" ? "rgba(239,68,68,0.95)" : "rgba(34,197,94,0.95)", color: "#fff", fontSize: "0.88rem", fontWeight: 500, boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "slide-in 0.3s ease" }}>{toast.msg}</div>}
+      {showSettings && <SettingsPanel settings={settings} onSave={saveSettings_} onClose={() => setShowSettings(false)} />}
+      {showImport && <ImportPanel settings={settings} date={selectedDate} existingEntries={dayEntries} onImport={importWorklogs} onClose={() => setShowImport(false)} />}
+
+      <div style={{ minHeight: "100vh", background: "#0f172a", fontFamily: "'Outfit', sans-serif", color: "#e2e8f0", padding: "24px clamp(8px, 3vw, 64px)", overflowX: "hidden" }}>
+        <div style={{ maxWidth: "1400px", margin: "0 auto", width: "100%" }}>
+
+          {/* Header */}
+          <div style={{ display: "flex", alignItems: "center", gap: "14px", marginBottom: "28px" }}>
+            <div style={{ width: "42px", height: "42px", borderRadius: "10px", background: "linear-gradient(135deg, #0891b2, #22d3ee)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.3rem", color: "#0f172a" }}>⏱</div>
+            <div style={{ flex: 1 }}>
+              <h1 style={{ fontSize: "1.35rem", fontWeight: 700, letterSpacing: "-0.02em", color: "#f1f5f9", lineHeight: 1.2 }}>Jira Time Tracker</h1>
+              <p style={{ fontSize: "0.78rem", color: "#475569", marginTop: "2px" }}>Track · Log · Sync</p>
+            </div>
+            <button onClick={() => setShowSettings(true)} style={{
+              padding: "8px 14px", borderRadius: "10px", border: "1px solid",
+              borderColor: jiraConnected ? "rgba(34,197,94,0.25)" : "rgba(255,255,255,0.1)",
+              background: jiraConnected ? "rgba(34,197,94,0.08)" : "rgba(255,255,255,0.03)",
+              color: jiraConnected ? "#22c55e" : "#64748b", cursor: "pointer", fontSize: "0.8rem", fontWeight: 500,
+              display: "flex", alignItems: "center", gap: "6px",
+            }}>
+              <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: jiraConnected ? "#22c55e" : "#475569", boxShadow: jiraConnected ? "0 0 6px rgba(34,197,94,0.5)" : "none" }} />
+              {jiraConnected ? "Connected" : "Connect Jira"}
+            </button>
+          </div>
+
+          {/* Tabs */}
+          <div style={{ display: "flex", gap: "2px", background: "rgba(255,255,255,0.03)", borderRadius: "12px", padding: "3px", marginBottom: "24px" }}>
+            {[{ key: "manual", label: "✎  Manual" }, { key: "timer", label: "⏱  Timer" }].map(t => (
+              <button key={t.key} onClick={() => setTab(t.key)} style={{
+                flex: 1, padding: "10px 16px", borderRadius: "10px", border: "none", cursor: "pointer",
+                fontSize: "0.88rem", fontWeight: 500, fontFamily: "'Outfit', sans-serif",
+                background: tab === t.key ? "rgba(34,211,238,0.1)" : "transparent",
+                color: tab === t.key ? "#22d3ee" : "#64748b",
+              }}>{t.label}</button>
+            ))}
+          </div>
+
+          {/* Timer */}
+          {tab === "timer" && (
+            <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: "16px", border: "1px solid rgba(255,255,255,0.06)", padding: "clamp(16px, 3vw, 32px) clamp(14px, 3vw, 28px)", marginBottom: "28px", animation: isRunning ? "pulse-glow 3s ease-in-out infinite" : "none" }}>
+              <div style={{ textAlign: "center", marginBottom: "28px" }}>
+                <TimerDisplay seconds={elapsed} isRunning={isRunning} />
+                {isRunning && <div style={{ fontSize: "0.8rem", color: "#0891b2", marginTop: "10px", fontFamily: "'JetBrains Mono', monospace", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
+                  <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#ef4444", animation: "pulse-glow 1.5s infinite" }} />
+                  {activeTicket}{activeDesc ? ` — ${activeDesc}` : ""}
+                </div>}
+              </div>
+              {!isRunning ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                  <div style={{ display: "flex", gap: "10px" }}>
+                    <TicketInput value={ticket} onChange={v => { setTicket(v); setTicketSummary(""); }} onSubmit={startTimer} placeholder="PROJ-123" favorites={favorites} onSelectFavorite={v => { setTicket(v); setTicketSummary(""); }} jiraSettings={settings} onSelectJira={t => { setTicket(t.key); setTicketSummary(t.summary); setDescription(prev => prev || t.summary); }} />
+                    <input type="text" value={description} onChange={e => setDescription(e.target.value)} onKeyDown={e => { if (e.key === "Enter") startTimer(); }} placeholder="Description (optional)" style={{ ...inputStyle, flex: 1.5 }} />
+                  </div>
+                  <button onClick={startTimer} disabled={!ticket.trim()} style={{ padding: "14px", borderRadius: "10px", border: "none", cursor: ticket.trim() ? "pointer" : "not-allowed", fontSize: "0.95rem", fontWeight: 600, background: ticket.trim() ? "linear-gradient(135deg, #0891b2, #22d3ee)" : "rgba(255,255,255,0.05)", color: ticket.trim() ? "#0f172a" : "#475569" }}>▶  Start timer</button>
+                </div>
+              ) : (
+                <button onClick={stopTimer} style={{ width: "100%", padding: "14px", borderRadius: "10px", border: "2px solid #ef4444", cursor: "pointer", fontSize: "0.95rem", fontWeight: 600, background: "rgba(239,68,68,0.1)", color: "#ef4444" }}
+                  onMouseOver={e => e.target.style.background = "rgba(239,68,68,0.2)"} onMouseOut={e => e.target.style.background = "rgba(239,68,68,0.1)"}
+                >■  Stop & Save</button>
+              )}
+            </div>
+          )}
+
+          {/* Manual */}
+          {tab === "manual" && (
+            <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: "16px", border: "1px solid rgba(255,255,255,0.06)", padding: "clamp(14px, 3vw, 28px)", marginBottom: "28px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                <div style={{ display: "flex", gap: "10px" }}>
+                  <TicketInput value={manualTicket} onChange={v => { setManualTicket(v); setManualTicketSummary(""); }} onSubmit={addManual} placeholder="PROJ-123" favorites={favorites} onSelectFavorite={v => { setManualTicket(v); setManualTicketSummary(""); }} jiraSettings={settings} onSelectJira={t => { setManualTicket(t.key); setManualTicketSummary(t.summary); setManualDesc(prev => prev || t.summary); }} />
+                  <input type="text" value={manualDesc} onChange={e => setManualDesc(e.target.value)} onKeyDown={e => { if (e.key === "Enter") addManual(); }} placeholder="Description (optional)" style={{ ...inputStyle, flex: 1.5 }} />
+                </div>
+                <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <input type="time" value={manualStartTime} onChange={e => setManualStartTime(e.target.value)}
+                      placeholder="--:--"
+                      style={{ ...monoInputStyle, padding: "8px 10px", fontSize: "0.88rem", colorScheme: "dark", width: "116px" }} />
+                    <span style={{ color: "#64748b", fontSize: "0.78rem" }}>start</span>
+                  </div>
+                  <div style={{ width: "1px", height: "24px", background: "rgba(255,255,255,0.06)" }} />
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <input type="number" min="0" max="23" value={manualH} onChange={e => setManualH(e.target.value)} placeholder="0" style={{ ...monoInputStyle, width: "76px", textAlign: "center", fontSize: "1rem" }} />
+                    <span style={{ color: "#64748b", fontSize: "0.85rem" }}>h</span>
+                  </div>
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <input type="number" min="0" max="59" step="15" value={manualM} onChange={e => setManualM(e.target.value)} placeholder="0" style={{ ...monoInputStyle, width: "76px", textAlign: "center", fontSize: "1rem" }} />
+                    <span style={{ color: "#64748b", fontSize: "0.85rem" }}>m</span>
+                  </div>
+                  <div style={{ flex: 1 }} />
+                  <button onClick={addManual} disabled={!manualTicket.trim() || ((parseInt(manualH) || 0) * 60 + (parseInt(manualM) || 0)) < 1} style={{ padding: "12px 24px", borderRadius: "10px", border: "none", cursor: "pointer", fontSize: "0.9rem", fontWeight: 600, background: "linear-gradient(135deg, #0891b2, #22d3ee)", color: "#0f172a", opacity: (!manualTicket.trim() || ((parseInt(manualH) || 0) * 60 + (parseInt(manualM) || 0)) < 1) ? 0.4 : 1 }}>+ Add</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Day selector */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} style={{ ...monoInputStyle, padding: "8px 12px", fontSize: "0.85rem", colorScheme: "dark" }} />
+              {selectedDate !== todayKey() && <button onClick={() => setSelectedDate(todayKey())} style={{ padding: "8px 12px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "8px", color: "#64748b", fontSize: "0.8rem", cursor: "pointer" }}>Today</button>}
+              {jiraConnected && <button onClick={() => setShowImport(true)} style={{
+                padding: "8px 14px", borderRadius: "8px",
+                border: "1px solid rgba(59,130,246,0.25)", background: "rgba(59,130,246,0.08)",
+                color: "#3b82f6", fontSize: "0.8rem", fontWeight: 500, cursor: "pointer",
+                display: "flex", alignItems: "center", gap: "5px",
+                transition: "all 0.2s",
+              }}
+              onMouseOver={e => { e.currentTarget.style.background = "rgba(59,130,246,0.15)"; e.currentTarget.style.borderColor = "rgba(59,130,246,0.4)"; }}
+              onMouseOut={e => { e.currentTarget.style.background = "rgba(59,130,246,0.08)"; e.currentTarget.style.borderColor = "rgba(59,130,246,0.25)"; }}
+              >↓ Import</button>}
+            </div>
+            {dayEntries.length > 0 && <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "0.9rem", fontWeight: 600, color: "#22d3ee" }}>Σ {formatHM(dayTotal)}</span>}
+          </div>
+
+          {/* Entries */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+            {dayEntries.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "48px 20px", color: "#334155", fontSize: "0.9rem" }}>
+                <div style={{ fontSize: "2rem", marginBottom: "12px", opacity: 0.4 }}>⏱</div>
+                No entries for this day
+              </div>
+            ) : <>
+              {dayEntries.map((entry, i) => (
+                <div key={entry.id} style={{ animation: `fade-in 0.3s ease ${i * 0.05}s both` }}>
+                  <EntryRow entry={entry} onDelete={deleteEntry} onToggleFavorite={toggleFavorite} isFavorite={favorites.includes(entry.ticket)} onSync={syncEntry} onUpdateEntry={updateEntry} jiraConnected={jiraConnected} />
+                </div>
+              ))}
+              <div style={{ display: "flex", gap: "8px", marginTop: "12px", justifyContent: "flex-end", flexWrap: "wrap" }}>
+                {jiraConnected && unsyncedCount > 0 && <button onClick={syncAllUnsynced} disabled={syncingAll} style={{ padding: "10px 18px", borderRadius: "10px", border: "1px solid rgba(59,130,246,0.3)", background: "rgba(59,130,246,0.08)", color: "#3b82f6", cursor: "pointer", fontSize: "0.85rem", fontWeight: 500, opacity: syncingAll ? 0.5 : 1 }}>{syncingAll ? "⟳ Syncing..." : `↑ Push all to Jira (${unsyncedCount})`}</button>}
+                <button onClick={copyAllForDay} style={{ padding: "10px 18px", borderRadius: "10px", border: "1px solid", borderColor: copiedAll ? "rgba(34,197,94,0.3)" : "rgba(34,211,238,0.3)", background: copiedAll ? "rgba(34,197,94,0.1)" : "rgba(34,211,238,0.06)", color: copiedAll ? "#22c55e" : "#22d3ee", cursor: "pointer", fontSize: "0.85rem", fontWeight: 500 }}>{copiedAll ? "✓ Copied!" : "📋 Copy all"}</button>
+              </div>
+            </>}
+          </div>
+
+          {/* Calendar sheet — grouped by calendar week */}
+          {availableDays.length > 0 && (() => {
+            // group ALL days by ISO week, expand to full Mon–Sun grid
+            const weekMap = {};
+            const daySet = new Set(availableDays);
+            availableDays.forEach(day => {
+              const { key } = isoWeekKey(day);
+              if (!weekMap[key]) {
+                // compute Mon of this week
+                const ref = new Date(day + "T12:00:00");
+                const dow = (ref.getDay() + 6) % 7;
+                const mon = new Date(ref); mon.setDate(ref.getDate() - dow);
+                const fullWeek = [];
+                for (let i = 0; i < 7; i++) {
+                  const d = new Date(mon); d.setDate(mon.getDate() + i);
+                  fullWeek.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`);
+                }
+                weekMap[key] = fullWeek;
+              }
+            });
+            const weekKeys = Object.keys(weekMap).sort((a, b) => b.localeCompare(a));
+            const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+            const todayStr = todayKey();
+            return (
+              <div style={{ marginTop: "36px", borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: "20px" }}>
+                <div style={{ fontSize: "0.72rem", color: "#475569", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: "14px", fontWeight: 600 }}>History</div>
+                {/* Header: day names */}
+                <div style={{ display: "grid", gridTemplateColumns: "48px repeat(7, 1fr) 56px 28px", gap: "3px", marginBottom: "4px" }}>
+                  <div />
+                  {dayNames.map(d => (
+                    <div key={d} style={{ textAlign: "center", fontSize: "0.62rem", color: "#334155", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", padding: "0 0 4px" }}>{d}</div>
+                  ))}
+                  <div style={{ textAlign: "center", fontSize: "0.62rem", color: "#334155", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Σ</div>
+                  <div />
+                </div>
+                {/* Week rows */}
+                {weekKeys.map(wk => {
+                  const fullWeek = weekMap[wk];
+                  const weekSec = fullWeek.reduce((s, dk) => s + (entries[dk] || []).reduce((s2, e) => s2 + e.seconds, 0), 0);
+                  const { week } = isoWeekKey(fullWeek[0]);
+                  const allSyncedWeek = fullWeek.every(dk => !(entries[dk] || []).length || entries[dk].every(e => e.syncStatus === "synced"));
+                  return (
+                    <div key={wk} style={{ display: "grid", gridTemplateColumns: "48px repeat(7, 1fr) 56px 28px", gap: "3px", marginBottom: "2px" }}>
+                      {/* Week number */}
+                      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "0.7rem", color: "#334155", fontWeight: 600, display: "flex", alignItems: "center" }}>W{String(week).padStart(2,"0")}</div>
+                      {/* 7 day cells */}
+                      {fullWeek.map((dk, i) => {
+                        const dayEntries_ = entries[dk] || [];
+                        const hasEntries = dayEntries_.length > 0;
+                        const daySum = dayEntries_.reduce((s, e) => s + e.seconds, 0);
+                        const allSynced = hasEntries && dayEntries_.every(e => e.syncStatus === "synced");
+                        const isActive = dk === selectedDate;
+                        const isToday = dk === todayStr;
+                        const isWeekend = i >= 5;
+                        const dayNum = parseInt(dk.slice(8));
+                        return (
+                          <button key={dk} onClick={() => setSelectedDate(dk)}
+                            style={{
+                              padding: "6px 2px", borderRadius: "6px", cursor: "pointer",
+                              border: isActive ? "1px solid rgba(34,211,238,0.5)" : isToday ? "1px solid rgba(34,211,238,0.2)" : "1px solid rgba(255,255,255,0.04)",
+                              background: isActive ? "rgba(34,211,238,0.12)" : hasEntries ? "rgba(255,255,255,0.03)" : "transparent",
+                              display: "flex", flexDirection: "column", alignItems: "center", gap: "2px",
+                              minHeight: "44px", justifyContent: "center",
+                              opacity: isWeekend && !hasEntries ? 0.3 : 1,
+                            }}
+                            onMouseOver={e => { if (!isActive) e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
+                            onMouseOut={e => { if (!isActive) e.currentTarget.style.background = hasEntries ? "rgba(255,255,255,0.03)" : "transparent"; }}
+                          >
+                            <span style={{ fontSize: "0.7rem", fontFamily: "'JetBrains Mono', monospace", color: isActive ? "#22d3ee" : isToday ? "#0891b2" : "#64748b", fontWeight: isActive || isToday ? 700 : 400 }}>{dayNum}</span>
+                            {hasEntries ? (
+                              <span style={{ fontSize: "0.65rem", fontFamily: "'JetBrains Mono', monospace", color: isActive ? "#22d3ee" : "#0891b2", fontWeight: 600 }}>{formatHM(daySum)}</span>
+                            ) : (
+                              <span style={{ fontSize: "0.6rem", color: "transparent" }}>·</span>
+                            )}
+                            {jiraConnected && allSynced && <span style={{ fontSize: "0.55rem", color: "#22c55e", lineHeight: 1 }}>✓</span>}
+                          </button>
+                        );
+                      })}
+                      {/* Week total */}
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: "0.72rem", color: "#22d3ee", fontWeight: 600 }}>
+                        {weekSec > 0 ? formatHM(weekSec) : ""}
+                      </div>
+                      {/* Copy button */}
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <button onClick={() => {
+                          const vals = [];
+                          for (let i = 0; i < 5; i++) {
+                            const dk = fullWeek[i];
+                            const sec = (entries[dk] || []).reduce((s, e) => s + e.seconds, 0);
+                            vals.push(String(Math.round(sec / 3600 * 100) / 100).replace(".", ","));
+                          }
+                          navigator.clipboard.writeText(vals.join("\t"));
+                          setCopiedWeek(wk); setTimeout(() => setCopiedWeek(null), 2000);
+                        }}
+                          style={{ background: "none", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "5px", padding: "2px 6px", cursor: "pointer", fontSize: "0.65rem", color: copiedWeek === wk ? "#22c55e" : "#475569" }}
+                          onMouseOver={e => e.currentTarget.style.color = copiedWeek === wk ? "#22c55e" : "#94a3b8"}
+                          onMouseOut={e => e.currentTarget.style.color = copiedWeek === wk ? "#22c55e" : "#475569"}
+                          title="Copy Mon–Fri hours (tab-separated)"
+                        >{copiedWeek === wk ? "✓" : "📋"}</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+
+          <div style={{ textAlign: "center", marginTop: "40px", paddingBottom: "20px", fontSize: "0.68rem", color: "#1e293b" }}>
+            Jira Time Tracker{jiraConnected ? " · Jira sync active" : ""}
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "jira-time-tracker",
+  "version": "1.0.0",
+  "description": "Local Jira time tracker with proxy for Jira Server/Data Center (PAT auth)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": ["jira", "time-tracking", "worklog"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}
