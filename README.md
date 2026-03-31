@@ -60,9 +60,11 @@ docker run -p 3001:3001 jira-time-tracker https://jira.your-company.com
 
 ### Creating a PAT
 
-1. Log in to Jira → Profile → **Personal Access Tokens**
-2. Create a token
-3. Enter it in the app under ⚙️ Settings
+1. Open `https://jira.your-company.com/secure/ViewProfile.jspa#!/personal-access-tokens` (or click the link in ⚙️ Settings)
+2. Click **Create token**, give it a name, and copy the value
+3. Paste it in the app under ⚙️ Settings
+
+> **Note:** PATs require Jira **Data Center** 8.14+. Jira Server (single-node) does not support PATs.
 
 The PAT is stored only in the browser (`localStorage`), not on the server.
 

@@ -9,7 +9,7 @@ Local Jira time tracker for Jira Server/Data Center.
 
 ## Technical Details
 
-- **Auth:** Bearer Token (Personal Access Token) — stored only in browser localStorage, not on the server
+- **Auth:** Bearer Token (Personal Access Token, requires Jira DC 8.14+) — stored only in browser localStorage, not on the server. PAT page: `/secure/ViewProfile.jspa#!/personal-access-tokens`
 - **API:** Jira REST API v2 (`/rest/api/2/*`)
 - **Storage:** Browser localStorage for entries, favorites, and settings
 - **Proxy:** Required due to XSRF validation on Jira Server/DC — browser requests from a different origin are rejected
