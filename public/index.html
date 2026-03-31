@@ -61,14 +61,15 @@ function toHHMM(date) {
   return `${String(date.getHours()).padStart(2,"0")}:${String(date.getMinutes()).padStart(2,"0")}`;
 }
 function isoWeekKey(dateStr) {
-  const d = new Date(dateStr + "T00:00:00");
-  const jan4 = new Date(d.getFullYear(), 0, 4);
-  const startOfW1 = new Date(jan4);
-  startOfW1.setDate(jan4.getDate() - ((jan4.getDay() + 6) % 7));
-  const diff = d - startOfW1;
-  const week = Math.floor(diff / 604800000) + 1;
-  const year = d.getFullYear();
-  return { year, week, key: `${year}-W${String(week).padStart(2,"0")}` };
+  // Use noon to avoid DST boundary issues in millisecond-based week calculation
+  const d = new Date(dateStr + "T12:00:00");
+  // ISO week: week 1 contains the year's first Thursday
+  const thu = new Date(d); thu.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
+  const isoYear = thu.getFullYear();
+  const jan4 = new Date(isoYear, 0, 4, 12);
+  const startOfW1 = new Date(jan4); startOfW1.setDate(jan4.getDate() - ((jan4.getDay() + 6) % 7));
+  const week = Math.round((thu - startOfW1) / 604800000) + 1;
+  return { year: isoYear, week, key: `${isoYear}-W${String(week).padStart(2,"0")}` };
 }
 function calcEndTime(startTime, seconds) {
   if (!startTime) return null;
