@@ -127,6 +127,7 @@ async function jiraFetch(settings, path, options = {}) {
     if (res.status === 404) hint = " → Domain or path not found. Is the URL correct?";
     throw new Error(`HTTP ${res.status}${hint}${body ? ` | ${body.slice(0, 150)}` : ""}`);
   }
+  if (res.status === 204) return null;
   return res.json();
 }
 async function searchTickets(settings, query) {
@@ -150,6 +151,9 @@ async function postWorklog(settings, ticketKey, seconds, description, startedISO
   if (description) body.comment = description;
   const result = await jiraFetch(settings, `/issue/${ticketKey}/worklog`, { method: "POST", body: JSON.stringify(body) });
   return result; // contains the new worklog ID
+}
+async function deleteWorklog(settings, ticketKey, worklogId) {
+  return jiraFetch(settings, `/issue/${ticketKey}/worklog/${worklogId}`, { method: "DELETE" });
 }
 async function testConnection(settings) { return jiraFetch(settings, "/myself"); }
 
@@ -702,6 +706,7 @@ function App() {
   const [activeTicketSummary, setActiveTicketSummary] = useState("");
   const [selectedDate, setSelectedDate] = useState(todayKey());
   const [copiedAll, setCopiedAll] = useState(false);
+  const [copiedTickets, setCopiedTickets] = useState(false);
   const [copiedWeek, setCopiedWeek] = useState(null);
   const [tab, setTab] = useState("manual");
   const [showSettings, setShowSettings] = useState(false);
@@ -824,7 +829,23 @@ function App() {
     });
   };
 
-  const deleteEntry = (id) => {
+  const deleteEntry = async (id) => {
+    // Find entry to check sync status
+    let entry = null;
+    for (const day of Object.keys(entries)) { entry = entries[day].find(e => e.id === id); if (entry) break; }
+    if (!entry) return;
+
+    if (entry.syncStatus === "synced" && entry.jiraWorklogId && jiraConnected) {
+      if (!confirm("This entry is synced to Jira. Delete it from Jira too?")) return;
+      try {
+        await deleteWorklog(settings, entry.ticket, entry.jiraWorklogId);
+        showToast(`${entry.ticket}: worklog deleted from Jira`);
+      } catch (e) {
+        showToast(`Jira delete failed: ${e.message.slice(0, 80)}`, "error");
+        return;
+      }
+    }
+
     const ne = { ...entries };
     for (const day of Object.keys(ne)) { ne[day] = ne[day].filter(e => e.id !== id); if (!ne[day].length) delete ne[day]; }
     persistEntries(ne);
@@ -858,6 +879,11 @@ function App() {
   const copyAllForDay = () => {
     navigator.clipboard.writeText(dayEntries.map(e => `${e.ticket}: ${toJiraFormat(e.seconds)}${e.description ? ` — ${e.description}` : ""}`).join("\n"));
     setCopiedAll(true); setTimeout(() => setCopiedAll(false), 2000);
+  };
+  const copyTicketsForDay = () => {
+    const unique = [...new Set(dayEntries.map(e => e.ticket))];
+    navigator.clipboard.writeText(unique.join(", "));
+    setCopiedTickets(true); setTimeout(() => setCopiedTickets(false), 2000);
   };
 
   return (
@@ -991,6 +1017,7 @@ function App() {
               ))}
               <div style={{ display: "flex", gap: "8px", marginTop: "12px", justifyContent: "flex-end", flexWrap: "wrap" }}>
                 {jiraConnected && unsyncedCount > 0 && <button onClick={syncAllUnsynced} disabled={syncingAll} style={{ padding: "10px 18px", borderRadius: "10px", border: "1px solid rgba(59,130,246,0.3)", background: "rgba(59,130,246,0.08)", color: "#3b82f6", cursor: "pointer", fontSize: "0.85rem", fontWeight: 500, opacity: syncingAll ? 0.5 : 1 }}>{syncingAll ? "⟳ Syncing..." : `↑ Push all to Jira (${unsyncedCount})`}</button>}
+                <button onClick={copyTicketsForDay} style={{ padding: "10px 18px", borderRadius: "10px", border: "1px solid", borderColor: copiedTickets ? "rgba(34,197,94,0.3)" : "rgba(255,255,255,0.1)", background: copiedTickets ? "rgba(34,197,94,0.1)" : "rgba(255,255,255,0.03)", color: copiedTickets ? "#22c55e" : "#94a3b8", cursor: "pointer", fontSize: "0.85rem", fontWeight: 500 }}>{copiedTickets ? "✓ Copied!" : "📋 Tickets"}</button>
                 <button onClick={copyAllForDay} style={{ padding: "10px 18px", borderRadius: "10px", border: "1px solid", borderColor: copiedAll ? "rgba(34,197,94,0.3)" : "rgba(34,211,238,0.3)", background: copiedAll ? "rgba(34,197,94,0.1)" : "rgba(34,211,238,0.06)", color: copiedAll ? "#22c55e" : "#22d3ee", cursor: "pointer", fontSize: "0.85rem", fontWeight: 500 }}>{copiedAll ? "✓ Copied!" : "📋 Copy all"}</button>
               </div>
             </>}

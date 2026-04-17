@@ -22,6 +22,7 @@ Open `http://localhost:3001`, enter your PAT — done.
 - **Issue summary** — Jira issue title shown next to ticket key in the entry list
 - **Favorites** — Save frequently used tickets with autocomplete
 - **Calendar history** — Weekly calendar view grouped by ISO week with hour totals per day and week
+- **Copy tickets** — Copy all unique ticket keys for the day as a comma-separated list
 - **Copy week** — Export a week's hours as tab-separated decimals (comma separator) for pasting into spreadsheets
 - **Start & end time** — Optional start time per entry, end time auto-calculated
 - **15-min increments** — Minute spinners step in quarter-hour intervals
@@ -50,8 +51,8 @@ JIRA_URL=https://jira.your-company.com PORT=8080 node server.js
 ### Docker
 
 ```bash
-# Pull and run from GitHub Container Registry
-docker run -p 3001:3001 ghcr.io/chgerkens/jira-time-tracker https://jira.your-company.com
+# Pull and run from GitHub Container Registry (always fetches the latest image)
+docker run --pull always -p 3001:3001 ghcr.io/chgerkens/jira-time-tracker https://jira.your-company.com
 
 # Or build and run locally
 docker build -t jira-time-tracker .
