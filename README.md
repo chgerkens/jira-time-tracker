@@ -4,6 +4,8 @@ Local time tracker for **Jira Server / Data Center** with built-in proxy.
 
 ![Node.js](https://img.shields.io/badge/Node.js-≥18-green) ![Dependencies](https://img.shields.io/badge/Dependencies-0-blue) ![Auth](https://img.shields.io/badge/Auth-PAT%20(Bearer)-orange)
 
+![Jira Time Tracker Screenshot](jtt-screenshot.png)
+
 ## Quickstart
 
 ```bash
