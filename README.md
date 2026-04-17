@@ -52,7 +52,7 @@ JIRA_URL=https://jira.your-company.com PORT=8080 node server.js
 
 ```bash
 # Pull and run from GitHub Container Registry (always fetches the latest image)
-docker run --pull always -p 3001:3001 ghcr.io/chgerkens/jira-time-tracker https://jira.your-company.com
+docker run --pull always -p 3001:3001 ghcr.io/chgerkens/jira-time-tracker:main https://jira.your-company.com
 
 # Or build and run locally
 docker build -t jira-time-tracker .
