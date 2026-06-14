@@ -7,7 +7,7 @@ Local time tracker for **Jira Server / Data Center** with built-in proxy.
 ![Jira Time Tracker Screenshot](jtt-screenshot.png)
 
 ## Quickstart
-
+    
 ```bash
 node server.js https://jira.your-company.com
 ```

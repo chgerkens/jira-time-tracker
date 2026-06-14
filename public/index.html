@@ -152,6 +152,10 @@ async function postWorklog(settings, ticketKey, seconds, description, startedISO
   const result = await jiraFetch(settings, `/issue/${ticketKey}/worklog`, { method: "POST", body: JSON.stringify(body) });
   return result; // contains the new worklog ID
 }
+async function updateWorklog(settings, ticketKey, worklogId, seconds, description, startedISO) {
+  const body = { timeSpentSeconds: seconds, started: startedISO, comment: description || "" };
+  return jiraFetch(settings, `/issue/${ticketKey}/worklog/${worklogId}`, { method: "PUT", body: JSON.stringify(body) });
+}
 async function deleteWorklog(settings, ticketKey, worklogId) {
   return jiraFetch(settings, `/issue/${ticketKey}/worklog/${worklogId}`, { method: "DELETE" });
 }
@@ -312,7 +316,7 @@ function SyncBadge({ status }) {
   return <span style={{ fontSize: "0.62rem", padding: "3px 8px", borderRadius: "8px", background: cfg.bg, color: cfg.color, fontWeight: 600, fontFamily: "'JetBrains Mono', monospace", whiteSpace: "nowrap" }}>{cfg.label}</span>;
 }
 
-function EntryRow({ entry, onDelete, onToggleFavorite, isFavorite, onSync, onUpdateEntry, jiraConnected }) {
+function EntryRow({ entry, entryDay, onDelete, onToggleFavorite, isFavorite, onSync, onUpdateEntry, jiraConnected }) {
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState({});
 
@@ -320,6 +324,7 @@ function EntryRow({ entry, onDelete, onToggleFavorite, isFavorite, onSync, onUpd
     setEditForm({
       ticket: entry.ticket,
       description: entry.description || "",
+      date: entryDay,
       startTime: entry.startTime || "",
       h: String(Math.floor(entry.seconds / 3600)),
       m: String(Math.floor((entry.seconds % 3600) / 60)),
@@ -329,20 +334,22 @@ function EntryRow({ entry, onDelete, onToggleFavorite, isFavorite, onSync, onUpd
 
   const saveEdit = () => {
     const totalSec = (parseInt(editForm.h) || 0) * 3600 + (parseInt(editForm.m) || 0) * 60;
-    if (!editForm.ticket.trim() || totalSec < 60) return;
+    if (!editForm.ticket.trim() || totalSec < 60 || !editForm.date) return;
+    const newDate = editForm.date;
     const changed = editForm.ticket.trim().toUpperCase() !== entry.ticket
       || editForm.description.trim() !== (entry.description || "")
       || (editForm.startTime || null) !== entry.startTime
-      || totalSec !== entry.seconds;
+      || totalSec !== entry.seconds
+      || newDate !== entryDay;
     const updated = {
       ...entry,
       ticket: editForm.ticket.trim().toUpperCase(),
       description: editForm.description.trim(),
       startTime: editForm.startTime || null,
       seconds: totalSec,
-      ...(changed && entry.syncStatus !== "local" ? { syncStatus: "local", jiraWorklogId: null } : {}),
+      ...(changed && entry.syncStatus !== "local" ? { syncStatus: "local" } : {}),
     };
-    onUpdateEntry(updated);
+    onUpdateEntry(updated, newDate !== entryDay ? newDate : null);
     setEditing(false);
   };
 
@@ -426,6 +433,13 @@ function EntryRow({ entry, onDelete, onToggleFavorite, isFavorite, onSync, onUpd
           </div>
           <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
             <div style={{ display: "flex", gap: "5px", alignItems: "center" }}>
+              <input type="date" value={editForm.date}
+                onChange={e => setEditForm(f => ({ ...f, date: e.target.value }))}
+                style={{ ...monoInputStyle, width: "140px", padding: "6px 10px", fontSize: "0.85rem", colorScheme: "dark" }} />
+              <span style={{ fontSize: "0.72rem", color: "#475569" }}>Date</span>
+            </div>
+            <div style={{ width: "1px", height: "20px", background: "rgba(255,255,255,0.06)" }} />
+            <div style={{ display: "flex", gap: "5px", alignItems: "center" }}>
               <input type="time" value={editForm.startTime}
                 onChange={e => setEditForm(f => ({ ...f, startTime: e.target.value }))}
                 style={{ ...monoInputStyle, width: "110px", padding: "6px 10px", fontSize: "0.85rem", colorScheme: "dark" }} />
@@ -447,8 +461,8 @@ function EntryRow({ entry, onDelete, onToggleFavorite, isFavorite, onSync, onUpd
               <span style={{ fontSize: "0.8rem", color: "#475569" }}>m</span>
             </div>
             <div style={{ flex: 1 }} />
-            {entry.syncStatus === "synced" && (
-              <span style={{ fontSize: "0.72rem", color: "#f59e0b" }}>⚠ Already synced to Jira — sync status will be reset</span>
+            {entry.jiraWorklogId && (
+              <span style={{ fontSize: "0.72rem", color: "#f59e0b" }}>⚠ Already in Jira — next push will update the worklog</span>
             )}
             <button onClick={() => setEditing(false)}
               style={{ padding: "7px 14px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.1)", background: "transparent", color: "#64748b", cursor: "pointer", fontSize: "0.82rem", fontFamily: "'Outfit', sans-serif" }}
@@ -744,7 +758,7 @@ function App() {
 
   const saveSettings_ = (s) => { setSettings(s); saveData(SETTINGS_KEY, s); };
 
-  const updateEntrySync = (entryId, syncStatus, worklogId = null) => {
+  const updateEntrySync = (entryId, syncStatus, worklogId = null, jiraTicket = null) => {
     setEntries(prev => {
       const ne = { ...prev };
       for (const day of Object.keys(ne)) {
@@ -752,6 +766,7 @@ function App() {
           if (e.id === entryId) {
             const updated = { ...e, syncStatus };
             if (worklogId) updated.jiraWorklogId = worklogId;
+            if (jiraTicket) updated.jiraTicket = jiraTicket;
             return updated;
           }
           return e;
@@ -788,13 +803,28 @@ function App() {
     setManualH(""); setManualM(""); setManualTicket(""); setManualTicketSummary(""); setManualDesc(""); setManualStartTime("");
   };
 
+  const pushToJira = async (entry, day) => {
+    const startedISO = buildStartedISO(entry.startTime, day);
+    const oldTicket = entry.jiraTicket || entry.ticket;
+    if (entry.jiraWorklogId && oldTicket === entry.ticket) {
+      const result = await updateWorklog(settings, entry.ticket, entry.jiraWorklogId, entry.seconds, entry.description, startedISO);
+      return { id: result.id || entry.jiraWorklogId, ticket: entry.ticket };
+    }
+    const result = await postWorklog(settings, entry.ticket, entry.seconds, entry.description, startedISO);
+    if (entry.jiraWorklogId) {
+      try { await deleteWorklog(settings, oldTicket, entry.jiraWorklogId); }
+      catch (e) { if (!/HTTP 404/.test(e.message)) console.warn("Old worklog cleanup failed:", e.message); }
+    }
+    return { id: result.id, ticket: entry.ticket };
+  };
+
   const syncEntry = async (entry) => {
     if (!jiraConnected) return;
     updateEntrySync(entry.id, "syncing");
     try {
       const day = Object.keys(entries).find(d => entries[d].some(e => e.id === entry.id)) || todayKey();
-      const result = await postWorklog(settings, entry.ticket, entry.seconds, entry.description, buildStartedISO(entry.startTime, day));
-      updateEntrySync(entry.id, "synced", result.id);
+      const { id, ticket } = await pushToJira(entry, day);
+      updateEntrySync(entry.id, "synced", id, ticket);
       showToast(`${entry.ticket}: ${toJiraFormat(entry.seconds)} → Jira`);
     } catch (e) { updateEntrySync(entry.id, "error"); showToast(`Error: ${e.message.slice(0, 80)}`, "error"); }
   };
@@ -808,8 +838,8 @@ function App() {
     for (const entry of unsynced) {
       try {
         updateEntrySync(entry.id, "syncing");
-        const result = await postWorklog(settings, entry.ticket, entry.seconds, entry.description, buildStartedISO(entry.startTime, selectedDate));
-        updateEntrySync(entry.id, "synced", result.id);
+        const { id, ticket } = await pushToJira(entry, selectedDate);
+        updateEntrySync(entry.id, "synced", id, ticket);
         ok++;
       }
       catch { updateEntrySync(entry.id, "error"); fail++; }
@@ -818,11 +848,17 @@ function App() {
     showToast(`${ok} logged${fail > 0 ? `, ${fail} failed` : ""}`, fail > 0 ? "error" : "success");
   };
 
-  const updateEntry = (updatedEntry) => {
+  const updateEntry = (updatedEntry, newDate = null) => {
     setEntries(prev => {
       const ne = { ...prev };
-      for (const day of Object.keys(ne)) {
-        ne[day] = ne[day].map(e => e.id === updatedEntry.id ? updatedEntry : e);
+      const currentDay = Object.keys(ne).find(d => ne[d].some(e => e.id === updatedEntry.id));
+      if (!currentDay) return prev;
+      if (newDate && newDate !== currentDay) {
+        ne[currentDay] = ne[currentDay].filter(e => e.id !== updatedEntry.id);
+        if (!ne[currentDay].length) delete ne[currentDay];
+        ne[newDate] = [...(ne[newDate] || []), updatedEntry];
+      } else {
+        ne[currentDay] = ne[currentDay].map(e => e.id === updatedEntry.id ? updatedEntry : e);
       }
       saveData(STORAGE_KEY, ne);
       return ne;
@@ -835,14 +871,19 @@ function App() {
     for (const day of Object.keys(entries)) { entry = entries[day].find(e => e.id === id); if (entry) break; }
     if (!entry) return;
 
-    if (entry.syncStatus === "synced" && entry.jiraWorklogId && jiraConnected) {
-      if (!confirm("This entry is synced to Jira. Delete it from Jira too?")) return;
+    if (entry.jiraWorklogId && jiraConnected) {
+      if (!confirm("This entry has a Jira worklog. Delete it from Jira too?")) return;
+      const wlTicket = entry.jiraTicket || entry.ticket;
       try {
-        await deleteWorklog(settings, entry.ticket, entry.jiraWorklogId);
-        showToast(`${entry.ticket}: worklog deleted from Jira`);
+        await deleteWorklog(settings, wlTicket, entry.jiraWorklogId);
+        showToast(`${wlTicket}: worklog deleted from Jira`);
       } catch (e) {
-        showToast(`Jira delete failed: ${e.message.slice(0, 80)}`, "error");
-        return;
+        if (/HTTP 404/.test(e.message)) {
+          // Worklog already gone in Jira — proceed with local delete
+        } else {
+          showToast(`Jira delete failed: ${e.message.slice(0, 80)}`, "error");
+          return;
+        }
       }
     }
 
@@ -859,6 +900,7 @@ function App() {
       const entry = {
         id: generateId(),
         jiraWorklogId: wl.jiraWorklogId,
+        jiraTicket: wl.ticket,
         ticket: wl.ticket,
         description: wl.description || wl.summary || "",
         seconds: wl.seconds,
@@ -1012,7 +1054,7 @@ function App() {
             ) : <>
               {dayEntries.map((entry, i) => (
                 <div key={entry.id} style={{ animation: `fade-in 0.3s ease ${i * 0.05}s both` }}>
-                  <EntryRow entry={entry} onDelete={deleteEntry} onToggleFavorite={toggleFavorite} isFavorite={favorites.includes(entry.ticket)} onSync={syncEntry} onUpdateEntry={updateEntry} jiraConnected={jiraConnected} />
+                  <EntryRow entry={entry} entryDay={selectedDate} onDelete={deleteEntry} onToggleFavorite={toggleFavorite} isFavorite={favorites.includes(entry.ticket)} onSync={syncEntry} onUpdateEntry={updateEntry} jiraConnected={jiraConnected} />
                 </div>
               ))}
               <div style={{ display: "flex", gap: "8px", marginTop: "12px", justifyContent: "flex-end", flexWrap: "wrap" }}>
