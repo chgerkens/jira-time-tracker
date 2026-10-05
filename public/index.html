@@ -22,10 +22,11 @@
 <body>
 <div id="root"></div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.29.9/babel.min.js" integrity="sha384-oLbIC13I/8DNBviftYPfOFQS5DC2WUmwk0SyIPmnzu1Ui+vYyATSSBJiJ5ETa4o/" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
+<script src="/lib.js"></script>
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
@@ -33,57 +34,7 @@ const STORAGE_KEY = "jira-time-entries";
 const FAVORITES_KEY = "jira-favorites";
 const SETTINGS_KEY = "jira-settings";
 
-// ─── Helpers ────────────────────────────────────────────────────────
-function formatDuration(seconds) {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
-}
-function formatHM(seconds) {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (h === 0) return `${m}m`;
-  if (m === 0) return `${h}h`;
-  return `${h}h ${m}m`;
-}
-function toJiraFormat(seconds) {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const parts = [];
-  if (h > 0) parts.push(`${h}h`);
-  if (m > 0) parts.push(`${m}m`);
-  return parts.join(" ") || "0m";
-}
-function todayKey() { return new Date().toISOString().slice(0, 10); }
-function generateId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
-function toHHMM(date) {
-  return `${String(date.getHours()).padStart(2,"0")}:${String(date.getMinutes()).padStart(2,"0")}`;
-}
-function isoWeekKey(dateStr) {
-  // Use noon to avoid DST boundary issues in millisecond-based week calculation
-  const d = new Date(dateStr + "T12:00:00");
-  // ISO week: week 1 contains the year's first Thursday
-  const thu = new Date(d); thu.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
-  const isoYear = thu.getFullYear();
-  const jan4 = new Date(isoYear, 0, 4, 12);
-  const startOfW1 = new Date(jan4); startOfW1.setDate(jan4.getDate() - ((jan4.getDay() + 6) % 7));
-  const week = Math.round((thu - startOfW1) / 604800000) + 1;
-  return { year: isoYear, week, key: `${isoYear}-W${String(week).padStart(2,"0")}` };
-}
-function calcEndTime(startTime, seconds) {
-  if (!startTime) return null;
-  const [h, m] = startTime.split(":").map(Number);
-  const totalMin = h * 60 + m + Math.round(seconds / 60);
-  return `${String(Math.floor(totalMin / 60) % 24).padStart(2,"0")}:${String(totalMin % 60).padStart(2,"0")}`;
-}
-function buildStartedISO(startTime, day) {
-  if (startTime) {
-    const d = new Date(`${day}T${startTime}:00`);
-    if (!isNaN(d.getTime())) return d.toISOString().replace("Z", "+0000");
-  }
-  return new Date(day + "T12:00:00.000+0000").toISOString().replace("Z", "+0000");
-}
+// Helpers (formatHM, todayKey, isoWeekKey, …) live in /lib.js
 
 // ─── Storage (localStorage) ─────────────────────────────────────────
 function loadData(key, fallback) {
@@ -249,7 +200,7 @@ function TicketInput({ value, onChange, onSubmit, placeholder, favorites, onSele
   return (
     <div style={{ position: "relative", flex: 1 }}>
       <div style={{ position: "relative" }}>
-        <input type="text" value={value}
+        <input type="text" value={value} aria-label="Ticket"
           onChange={e => { onChange(e.target.value.toUpperCase()); setShowSuggestions(true); }}
           onKeyDown={e => { if (e.key === "Enter") { onSubmit(); setShowSuggestions(false); } }}
           onFocus={() => setShowSuggestions(true)}
@@ -366,13 +317,13 @@ function EntryRow({ entry, entryDay, onDelete, onToggleFavorite, isFavorite, onS
   const rowBg = editing ? "rgba(34,211,238,0.03)" : "rgba(255,255,255,0.02)";
 
   return (
-    <div style={{ borderRadius: "10px", border: editing ? "1px solid rgba(34,211,238,0.2)" : "1px solid rgba(255,255,255,0.05)", overflow: "hidden", transition: "border-color 0.2s" }}>
+    <div data-testid="entry" style={{ borderRadius: "10px", border: editing ? "1px solid rgba(34,211,238,0.2)" : "1px solid rgba(255,255,255,0.05)", overflow: "hidden", transition: "border-color 0.2s" }}>
       {/* ── Summary row ── */}
       <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "14px 16px", background: rowBg, transition: "background 0.2s", flexWrap: "wrap", minWidth: 0 }}
         onMouseOver={e => { if (!editing) e.currentTarget.style.background = "rgba(255,255,255,0.04)"; }}
         onMouseOut={e => { e.currentTarget.style.background = rowBg; }}
       >
-        <button onClick={() => onToggleFavorite(entry.ticket)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "0.9rem", padding: "2px", opacity: isFavorite ? 1 : 0.2, color: "#f59e0b" }}>★</button>
+        <button onClick={() => onToggleFavorite(entry.ticket)} aria-label="Toggle favorite" aria-pressed={isFavorite} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "0.9rem", padding: "2px", opacity: isFavorite ? 1 : 0.2, color: "#f59e0b" }}>★</button>
         <div style={{ display: "flex", flexDirection: "column", minWidth: "90px" }}>
           {jiraUrl ? (
             <a href={jiraUrl} target="_blank" rel="noopener noreferrer"
@@ -410,7 +361,7 @@ function EntryRow({ entry, entryDay, onDelete, onToggleFavorite, isFavorite, onS
           onMouseOver={e => { if (!editing) e.currentTarget.style.color = "#94a3b8"; }}
           onMouseOut={e => { if (!editing) e.currentTarget.style.color = "#334155"; }}
         >✎</button>
-        <button onClick={() => onDelete(entry.id)}
+        <button onClick={() => onDelete(entry.id)} aria-label="Delete entry"
           style={{ background: "none", border: "none", cursor: "pointer", fontSize: "1rem", color: "#334155", padding: "2px 4px" }}
           onMouseOver={e => e.target.style.color = "#ef4444"} onMouseOut={e => e.target.style.color = "#334155"}
         >×</button>
@@ -420,12 +371,12 @@ function EntryRow({ entry, entryDay, onDelete, onToggleFavorite, isFavorite, onS
       {editing && (
         <div style={{ padding: "14px 16px", background: "rgba(34,211,238,0.02)", borderTop: "1px solid rgba(34,211,238,0.1)", display: "flex", flexDirection: "column", gap: "10px" }}>
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            <input type="text" value={editForm.ticket}
+            <input type="text" value={editForm.ticket} aria-label="Ticket"
               onChange={e => setEditForm(f => ({ ...f, ticket: e.target.value.toUpperCase() }))}
               onKeyDown={e => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") setEditing(false); }}
               placeholder="PROJ-123"
               style={{ ...monoInputStyle, width: "130px", padding: "8px 12px", fontSize: "0.88rem" }} />
-            <input type="text" value={editForm.description}
+            <input type="text" value={editForm.description} aria-label="Description"
               onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))}
               onKeyDown={e => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") setEditing(false); }}
               placeholder="Description (optional)"
@@ -433,28 +384,28 @@ function EntryRow({ entry, entryDay, onDelete, onToggleFavorite, isFavorite, onS
           </div>
           <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
             <div style={{ display: "flex", gap: "5px", alignItems: "center" }}>
-              <input type="date" value={editForm.date}
+              <input type="date" value={editForm.date} aria-label="Date"
                 onChange={e => setEditForm(f => ({ ...f, date: e.target.value }))}
                 style={{ ...monoInputStyle, width: "140px", padding: "6px 10px", fontSize: "0.85rem", colorScheme: "dark" }} />
               <span style={{ fontSize: "0.72rem", color: "#475569" }}>Date</span>
             </div>
             <div style={{ width: "1px", height: "20px", background: "rgba(255,255,255,0.06)" }} />
             <div style={{ display: "flex", gap: "5px", alignItems: "center" }}>
-              <input type="time" value={editForm.startTime}
+              <input type="time" value={editForm.startTime} aria-label="Start time"
                 onChange={e => setEditForm(f => ({ ...f, startTime: e.target.value }))}
                 style={{ ...monoInputStyle, width: "110px", padding: "6px 10px", fontSize: "0.85rem", colorScheme: "dark" }} />
               <span style={{ fontSize: "0.72rem", color: "#475569" }}>Start</span>
             </div>
             <div style={{ width: "1px", height: "20px", background: "rgba(255,255,255,0.06)" }} />
             <div style={{ display: "flex", gap: "5px", alignItems: "center" }}>
-              <input type="number" min="0" max="23" value={editForm.h}
+              <input type="number" min="0" max="23" value={editForm.h} aria-label="Hours"
                 onChange={e => setEditForm(f => ({ ...f, h: e.target.value }))}
                 onKeyDown={e => { if (e.key === "Enter") saveEdit(); }}
                 style={{ ...monoInputStyle, width: "76px", textAlign: "center", padding: "6px 8px", fontSize: "0.9rem" }} />
               <span style={{ fontSize: "0.8rem", color: "#475569" }}>h</span>
             </div>
             <div style={{ display: "flex", gap: "5px", alignItems: "center" }}>
-              <input type="number" min="0" max="59" step="15" value={editForm.m}
+              <input type="number" min="0" max="59" step="15" value={editForm.m} aria-label="Minutes"
                 onChange={e => setEditForm(f => ({ ...f, m: e.target.value }))}
                 onKeyDown={e => { if (e.key === "Enter") saveEdit(); }}
                 style={{ ...monoInputStyle, width: "76px", textAlign: "center", padding: "6px 8px", fontSize: "0.9rem" }} />
@@ -508,7 +459,7 @@ function SettingsPanel({ settings, onSave, onClose }) {
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div>
             <label style={{ fontSize: "0.78rem", color: "#94a3b8", display: "block", marginBottom: "6px", fontWeight: 500 }}>Personal Access Token</label>
-            <input type="password" value={form.apiToken || ""} onChange={e => setForm({ ...form, apiToken: e.target.value })}
+            <input type="password" value={form.apiToken || ""} aria-label="Personal Access Token" onChange={e => setForm({ ...form, apiToken: e.target.value })}
               placeholder="PAT Token" style={{ ...inputStyle, width: "100%" }} />
             {window.JIRA_BASE_URL && <a href={`${window.JIRA_BASE_URL}/secure/ViewProfile.jspa#!/personal-access-tokens`} target="_blank" rel="noopener noreferrer"
               style={{ fontSize: "0.72rem", color: "#0891b2", marginTop: "6px", display: "inline-block", textDecoration: "none" }}
@@ -982,7 +933,7 @@ function App() {
                 <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                   <div style={{ display: "flex", gap: "10px" }}>
                     <TicketInput value={ticket} onChange={v => { setTicket(v); setTicketSummary(""); }} onSubmit={startTimer} placeholder="PROJ-123" favorites={favorites} onSelectFavorite={v => { setTicket(v); setTicketSummary(""); }} jiraSettings={settings} onSelectJira={t => { setTicket(t.key); setTicketSummary(t.summary); setDescription(prev => prev || t.summary); }} />
-                    <input type="text" value={description} onChange={e => setDescription(e.target.value)} onKeyDown={e => { if (e.key === "Enter") startTimer(); }} placeholder="Description (optional)" style={{ ...inputStyle, flex: 1.5 }} />
+                    <input type="text" value={description} aria-label="Description" onChange={e => setDescription(e.target.value)} onKeyDown={e => { if (e.key === "Enter") startTimer(); }} placeholder="Description (optional)" style={{ ...inputStyle, flex: 1.5 }} />
                   </div>
                   <button onClick={startTimer} disabled={!ticket.trim()} style={{ padding: "14px", borderRadius: "10px", border: "none", cursor: ticket.trim() ? "pointer" : "not-allowed", fontSize: "0.95rem", fontWeight: 600, background: ticket.trim() ? "linear-gradient(135deg, #0891b2, #22d3ee)" : "rgba(255,255,255,0.05)", color: ticket.trim() ? "#0f172a" : "#475569" }}>▶  Start timer</button>
                 </div>
@@ -1000,22 +951,22 @@ function App() {
               <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                 <div style={{ display: "flex", gap: "10px" }}>
                   <TicketInput value={manualTicket} onChange={v => { setManualTicket(v); setManualTicketSummary(""); }} onSubmit={addManual} placeholder="PROJ-123" favorites={favorites} onSelectFavorite={v => { setManualTicket(v); setManualTicketSummary(""); }} jiraSettings={settings} onSelectJira={t => { setManualTicket(t.key); setManualTicketSummary(t.summary); setManualDesc(prev => prev || t.summary); }} />
-                  <input type="text" value={manualDesc} onChange={e => setManualDesc(e.target.value)} onKeyDown={e => { if (e.key === "Enter") addManual(); }} placeholder="Description (optional)" style={{ ...inputStyle, flex: 1.5 }} />
+                  <input type="text" value={manualDesc} aria-label="Description" onChange={e => setManualDesc(e.target.value)} onKeyDown={e => { if (e.key === "Enter") addManual(); }} placeholder="Description (optional)" style={{ ...inputStyle, flex: 1.5 }} />
                 </div>
                 <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
                   <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                    <input type="time" value={manualStartTime} onChange={e => setManualStartTime(e.target.value)}
+                    <input type="time" value={manualStartTime} aria-label="Start time" onChange={e => setManualStartTime(e.target.value)}
                       placeholder="--:--"
                       style={{ ...monoInputStyle, padding: "8px 10px", fontSize: "0.88rem", colorScheme: "dark", width: "116px" }} />
                     <span style={{ color: "#64748b", fontSize: "0.78rem" }}>start</span>
                   </div>
                   <div style={{ width: "1px", height: "24px", background: "rgba(255,255,255,0.06)" }} />
                   <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                    <input type="number" min="0" max="23" value={manualH} onChange={e => setManualH(e.target.value)} placeholder="0" style={{ ...monoInputStyle, width: "76px", textAlign: "center", fontSize: "1rem" }} />
+                    <input type="number" min="0" max="23" value={manualH} aria-label="Hours" onChange={e => setManualH(e.target.value)} placeholder="0" style={{ ...monoInputStyle, width: "76px", textAlign: "center", fontSize: "1rem" }} />
                     <span style={{ color: "#64748b", fontSize: "0.85rem" }}>h</span>
                   </div>
                   <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                    <input type="number" min="0" max="59" step="15" value={manualM} onChange={e => setManualM(e.target.value)} placeholder="0" style={{ ...monoInputStyle, width: "76px", textAlign: "center", fontSize: "1rem" }} />
+                    <input type="number" min="0" max="59" step="15" value={manualM} aria-label="Minutes" onChange={e => setManualM(e.target.value)} placeholder="0" style={{ ...monoInputStyle, width: "76px", textAlign: "center", fontSize: "1rem" }} />
                     <span style={{ color: "#64748b", fontSize: "0.85rem" }}>m</span>
                   </div>
                   <div style={{ flex: 1 }} />
@@ -1028,7 +979,7 @@ function App() {
           {/* Day selector */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} style={{ ...monoInputStyle, padding: "8px 12px", fontSize: "0.85rem", colorScheme: "dark" }} />
+              <input type="date" value={selectedDate} aria-label="Day" onChange={e => setSelectedDate(e.target.value)} style={{ ...monoInputStyle, padding: "8px 12px", fontSize: "0.85rem", colorScheme: "dark" }} />
               {selectedDate !== todayKey() && <button onClick={() => setSelectedDate(todayKey())} style={{ padding: "8px 12px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "8px", color: "#64748b", fontSize: "0.8rem", cursor: "pointer" }}>Today</button>}
               {jiraConnected && <button onClick={() => setShowImport(true)} style={{
                 padding: "8px 14px", borderRadius: "8px",
@@ -1072,18 +1023,7 @@ function App() {
             const daySet = new Set(availableDays);
             availableDays.forEach(day => {
               const { key } = isoWeekKey(day);
-              if (!weekMap[key]) {
-                // compute Mon of this week
-                const ref = new Date(day + "T12:00:00");
-                const dow = (ref.getDay() + 6) % 7;
-                const mon = new Date(ref); mon.setDate(ref.getDate() - dow);
-                const fullWeek = [];
-                for (let i = 0; i < 7; i++) {
-                  const d = new Date(mon); d.setDate(mon.getDate() + i);
-                  fullWeek.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`);
-                }
-                weekMap[key] = fullWeek;
-              }
+              if (!weekMap[key]) weekMap[key] = weekDays(day);
             });
             const weekKeys = Object.keys(weekMap).sort((a, b) => b.localeCompare(a));
             const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -1150,13 +1090,7 @@ function App() {
                       {/* Copy button */}
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
                         <button onClick={() => {
-                          const vals = [];
-                          for (let i = 0; i < 5; i++) {
-                            const dk = fullWeek[i];
-                            const sec = (entries[dk] || []).reduce((s, e) => s + e.seconds, 0);
-                            vals.push(String(Math.round(sec / 3600 * 100) / 100).replace(".", ","));
-                          }
-                          navigator.clipboard.writeText(vals.join("\t"));
+                          navigator.clipboard.writeText(weekHoursTSV(fullWeek, entries));
                           setCopiedWeek(wk); setTimeout(() => setCopiedWeek(null), 2000);
                         }}
                           style={{ background: "none", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "5px", padding: "2px 6px", cursor: "pointer", fontSize: "0.65rem", color: copiedWeek === wk ? "#22c55e" : "#475569" }}
