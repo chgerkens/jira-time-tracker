@@ -4,11 +4,21 @@
   "description": "Local Jira time tracker with proxy for Jira Server/Data Center (PAT auth)",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test \"test/*.test.js\"",
+    "test:e2e": "playwright test",
+    "test:all": "npm test && npm run test:e2e"
   },
-  "keywords": ["jira", "time-tracking", "worklog"],
+  "keywords": [
+    "jira",
+    "time-tracking",
+    "worklog"
+  ],
   "license": "MIT",
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
   }
 }
