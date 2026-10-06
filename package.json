@@ -1,8 +1,14 @@
 {
-  "name": "jira-time-tracker",
+  "name": "@chgerkens/jira-time-tracker",
   "version": "1.0.0",
   "description": "Local Jira time tracker with proxy for Jira Server/Data Center (PAT auth)",
-  "main": "server.js",
+  "bin": {
+    "jira-time-tracker": "server.js"
+  },
+  "files": [
+    "server.js",
+    "public/"
+  ],
   "scripts": {
     "start": "node server.js",
     "test": "node --test \"test/*.test.js\"",
@@ -19,6 +25,14 @@
     "worklog"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chgerkens/jira-time-tracker.git"
+  },
+  "homepage": "https://github.com/chgerkens/jira-time-tracker#readme",
+  "bugs": {
+    "url": "https://github.com/chgerkens/jira-time-tracker/issues"
+  },
   "engines": {
     "node": ">=22"
   },
@@ -26,5 +40,8 @@
     "@playwright/test": "^1.63.0",
     "@stryker-mutator/core": "^10.0.0",
     "c8": "^12.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

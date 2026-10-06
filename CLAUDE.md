@@ -49,6 +49,8 @@ node server.js https://jira.your-company.com 8080
 
 Then open `http://localhost:3001` and enter your PAT.
 
+Without a clone: `npx github:chgerkens/jira-time-tracker https://jira.your-company.com` (package `@chgerkens/jira-time-tracker`, command `jira-time-tracker` → `server.js`). Only the files in `package.json` → `files` are shipped (`server.js`, `public/`); **new runtime files must be added there** — `test/package.test.js` pins the exact list. The unscoped npm name `jira-time-tracker` belongs to someone else.
+
 ## Git Workflow
 
 - **Never commit or push to `main`.** All changes go through a feature branch and a pull request, so CI (tests on all OSes, coverage gate) runs before anything reaches `main` — a push to `main` publishes the Docker image.

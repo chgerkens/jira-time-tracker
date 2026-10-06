@@ -2,17 +2,25 @@
 
 Local time tracker for **Jira Server / Data Center** with built-in proxy.
 
-![Node.js](https://img.shields.io/badge/Node.js-≥18-green) ![Dependencies](https://img.shields.io/badge/Dependencies-0-blue) ![Auth](https://img.shields.io/badge/Auth-PAT%20(Bearer)-orange)
+![Node.js](https://img.shields.io/badge/Node.js-≥22-green) ![Dependencies](https://img.shields.io/badge/Dependencies-0-blue) ![Auth](https://img.shields.io/badge/Auth-PAT%20(Bearer)-orange)
 
 ![Jira Time Tracker Screenshot](jtt-screenshot.png)
 
 ## Quickstart
-    
+
+With Node.js ≥ 22 installed, no clone or install needed:
+
 ```bash
-node server.js https://jira.your-company.com
+npx github:chgerkens/jira-time-tracker https://jira.your-company.com
 ```
 
 Open `http://localhost:3001`, enter your PAT — done.
+
+Pin a version with `npx github:chgerkens/jira-time-tracker#<tag or commit> …`. Port and options work as below, e.g. `npx github:chgerkens/jira-time-tracker https://jira.your-company.com 8080`.
+
+From a clone: `node server.js https://jira.your-company.com`.
+
+> The npm package `jira-time-tracker` (without scope) is **not** this project — don't run `npx jira-time-tracker`.
 
 ## Features
 
