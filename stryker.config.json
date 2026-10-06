@@ -1,0 +1,42 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "testRunner": "command",
+  "commandRunner": {
+    "command": "npm test"
+  },
+  "mutate": [
+    "server.js",
+    "public/lib.js"
+  ],
+  "ignorePatterns": [
+    "e2e",
+    "coverage",
+    "reports",
+    "test-results",
+    "playwright-report",
+    ".claude",
+    "{{pkgetc}}",
+    "{{HOMEBREW_PREFIX}}"
+  ],
+  "reporters": [
+    "html",
+    "json",
+    "clear-text",
+    "progress"
+  ],
+  "htmlReporter": {
+    "fileName": "reports/mutation/index.html"
+  },
+  "jsonReporter": {
+    "fileName": "reports/mutation/mutation.json"
+  },
+  "thresholds": {
+    "high": 95,
+    "low": 90,
+    "break": 90
+  },
+  "concurrency": 4,
+  "timeoutMS": 10000,
+  "tempDirName": ".stryker-tmp",
+  "cleanTempDir": "always"
+}
