@@ -17,6 +17,8 @@ Local Jira time tracker for Jira Server/Data Center.
 - **Storage:** Browser localStorage for entries, favorites, and settings
 - **Proxy:** Required due to XSRF validation on Jira Server/DC — browser requests from a different origin are rejected
 - **TLS:** Jira certificates are verified against Node's CAs plus the OS trust store (`tls.getCACertificates("system")`, Node ≥ 22.15). `node server.js --export-ca <URL>` prints Jira's root CA as PEM (for Docker + `NODE_EXTRA_CA_CERTS`). CI job `trust-store` installs a generated test CA (`test/certs.js`) into the macOS/Windows/Linux trust store and runs the TLS tests with `JTT_OS_TRUSTS_TEST_CA=1`.
+- **Test quality:** `npm run coverage` (c8, thresholds in `.c8rc.json` — raise them when coverage goes up, never lower them to make CI pass), `npm run mutation` (Stryker, config `stryker.config.json`, workflow `mutation.yml`, runs on relevant changes to main + on demand). CI publishes JUnit results as PR annotations (`reports/junit-*.xml`) and summaries via `scripts/*-summary.js`.
+- **Mutation testing rules:** kill surviving mutants with tests first. Only mark truly equivalent/untestable mutants, always with a reason: `// Stryker disable next-line <Mutator>: <reason>`. A directive must sit directly before a statement — `next-line` only covers that one line, and comments inside `? :` or right before `}` are silently ignored (a stray `disable all` then ignores the rest of the file). Check the "Ignored" column after changing directives.
 - **Node:** ≥ 22 (`engines`, `.nvmrc` = 24). Unit/server tests run on ubuntu, macOS and Windows in CI.
 - **No build step:** No runtime dependencies, no bundler (Playwright is a dev dependency for e2e tests only). `node server.js <JIRA_URL>` starts everything.
 

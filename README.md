@@ -118,7 +118,18 @@ npm run test:e2e    # browser tests
 - **Server tests** (`test/server.test.js`) start `server.js` in front of a fake Jira server and check the proxy, the request guard, cookie handling and TLS verification.
 - **E2E tests** (`e2e/`) drive the app in headless Chromium against a stateful fake Jira: entries, editing, search, favorites, push/update/delete of worklogs, import, timer and the copy buttons. They need internet access to load React and Babel from the CDN.
 
-The app itself still has no runtime dependencies; Playwright is only needed for the e2e tests.
+The app itself still has no runtime dependencies; Playwright, c8 and Stryker are dev dependencies for testing only.
+
+### Test quality
+
+```bash
+npm run coverage    # unit + server tests with coverage (c8), fails below the thresholds in .c8rc.json
+npm run mutation    # mutation testing (Stryker, ~10 min), report in reports/mutation/index.html
+```
+
+- **Coverage** includes `server.js` running in child processes. UI code inside `index.html` is compiled in the browser and can't be measured — it's covered by the e2e tests, which is a good reason to move logic into `public/lib.js`.
+- **Mutation testing** plants small bugs (e.g. `<` → `<=`, removed conditions) in `server.js` and `public/lib.js` and checks that a test fails. The mutation score shows how many the tests catch; the CI run fails below 90 %. Mutants that can't be caught (e.g. fallbacks for older Node versions) are marked in the code with `// Stryker disable …: <reason>`.
+- **In CI**, failed tests appear as annotations on the PR, each run's summary shows the coverage table, and the HTML coverage and Playwright reports are attached to the run as artifacts. Mutation testing runs when `server.js`, `public/lib.js`, the tests or the Stryker setup change on `main`, and on demand (*Actions → Mutation testing → Run workflow*).
 
 ## Project structure
 

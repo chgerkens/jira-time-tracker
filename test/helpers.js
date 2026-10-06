@@ -83,29 +83,48 @@ async function startApp(jiraUrl, env = {}) {
   return {
     port,
     output: () => output,
-    stop: () =>
+    // Resolves with { code, signal } once the process has exited
+    stop: (signal = "SIGTERM") =>
       new Promise((resolve) => {
-        if (child.exitCode !== null) return resolve();
-        child.on("exit", resolve);
-        child.kill("SIGTERM");
+        if (child.exitCode !== null) return resolve({ code: child.exitCode, signal: null });
+        child.on("exit", (code, sig) => resolve({ code, signal: sig }));
+        child.kill(signal);
       }),
   };
 }
 
 function canConnect(host, port) {
+  return connectResult(host, port).then((r) => r === "connected");
+}
+
+// "connected", "refused" (nothing listening there) or "timeout"/"error".
+// Use this to assert a port is closed: a timeout proves nothing.
+function connectResult(host, port, timeout = 2000) {
   return new Promise((resolve) => {
     const sock = net.connect({ host, port });
-    sock.setTimeout(500);
+    sock.setTimeout(timeout);
     sock.on("connect", () => {
       sock.destroy();
-      resolve(true);
+      resolve("connected");
     });
     sock.on("timeout", () => {
       sock.destroy();
-      resolve(false);
+      resolve("timeout");
     });
-    sock.on("error", () => resolve(false));
+    sock.on("error", (err) => resolve(err.code === "ECONNREFUSED" ? "refused" : `error ${err.code}`));
   });
+}
+
+// Resolves once the server's output matches re (logs arrive asynchronously)
+async function waitForOutput(app, re, timeout = 3000) {
+  const deadline = Date.now() + timeout;
+  while (!re.test(app.output())) {
+    if (Date.now() > deadline) {
+      throw new Error(`Output did not match ${re} within ${timeout}ms:\n${app.output()}`);
+    }
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  return app.output();
 }
 
 // Raw HTTP request so the Host header can be set freely
@@ -123,6 +142,7 @@ function request(port, { method = "GET", path: p = "/", headers = {}, body } = {
         path: p,
         headers: allHeaders,
         setHost,
+        agent: false, // fresh connection per request: no state leaks between tests
       },
       (res) => {
         const chunks = [];
@@ -142,4 +162,4 @@ function request(port, { method = "GET", path: p = "/", headers = {}, body } = {
   });
 }
 
-module.exports = { freePort, startFakeJira, startApp, canConnect, request };
+module.exports = { freePort, startFakeJira, startApp, canConnect, connectResult, waitForOutput, request };

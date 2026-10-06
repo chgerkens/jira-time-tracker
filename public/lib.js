@@ -71,6 +71,7 @@ function calcEndTime(startTime, seconds) {
   return `${String(Math.floor(totalMin / 60) % 24).padStart(2,"0")}:${String(totalMin % 60).padStart(2,"0")}`;
 }
 function buildStartedISO(startTime, day) {
+  // Stryker disable next-line ConditionalExpression: equivalent — without a start time the date is invalid and falls through
   if (startTime) {
     const d = new Date(`${day}T${startTime}:00`);
     if (!isNaN(d.getTime())) return d.toISOString().replace("Z", "+0000");
@@ -78,6 +79,7 @@ function buildStartedISO(startTime, day) {
   return new Date(day + "T12:00:00.000+0000").toISOString().replace("Z", "+0000");
 }
 
+// Stryker disable next-line all: only false in the browser, which the unit tests don't run in
 if (typeof module !== "undefined") {
   module.exports = {
     formatDuration, formatHM, toJiraFormat, localDateKey, todayKey, generateId,
