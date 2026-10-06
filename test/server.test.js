@@ -707,8 +707,9 @@ describe("network binding", () => {
     const app = await startApp(jira.url);
     try {
       assert.equal(await canConnect("127.0.0.1", app.port), true);
-      // must be actively refused — a timeout would prove nothing
-      assert.equal(await connectResult(ip, app.port), "refused");
+      // must be actively refused — a timeout would prove nothing.
+      // Windows retries refused connects for ~2s before reporting them.
+      assert.equal(await connectResult(ip, app.port, 10000), "refused");
     } finally {
       await app.stop();
       await jira.close();
