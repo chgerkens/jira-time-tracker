@@ -1,0 +1,5 @@
+# LF everywhere, also in Windows checkouts: a CRLF shebang in server.js
+# ("#!/usr/bin/env node\r") breaks the npx command on macOS/Linux.
+* text=auto eol=lf
+
+*.png binary
