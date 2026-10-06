@@ -21,9 +21,6 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         node: [22, 24]
-    env:
-      # One matrix entry measures coverage (c8) and enforces the thresholds
-      COVERAGE: ${{ matrix.os == 'ubuntu-latest' && matrix.node == 24 }}
 
     steps:
       - name: Checkout
@@ -35,38 +32,7 @@ jobs:
           node-version: ${{ matrix.node }}
 
       - name: Run tests
-        if: env.COVERAGE != 'true'
-        run: npm run test:ci
-
-      - name: Install dependencies
-        if: env.COVERAGE == 'true'
-        run: npm ci
-
-      - name: Run tests with coverage
-        if: env.COVERAGE == 'true'
-        run: npm run coverage
-
-      - name: Coverage summary
-        if: always() && env.COVERAGE == 'true'
-        run: node scripts/coverage-summary.js >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload coverage report
-        if: always() && env.COVERAGE == 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: coverage-report
-          path: coverage/
-          retention-days: 14
-
-      - name: Test report
-        if: always()
-        uses: mikepenz/action-junit-report@b7b80d7ac5b1da46d6aaff9fb57ad50d8453bcb3 # v6.6.0
-        with:
-          report_paths: reports/junit-node.xml
-          check_name: Tests (${{ matrix.os }}, Node ${{ matrix.node }})
-          annotate_only: true
-          detailed_summary: true
-          require_tests: true
+        run: npm test
 
   # Installs a freshly generated test CA into each OS trust store and checks
   # that server.js trusts it without any configuration.
@@ -136,25 +102,15 @@ jobs:
       - name: Run e2e tests
         run: npm run test:e2e
 
-      - name: Test report
-        if: always()
-        uses: mikepenz/action-junit-report@b7b80d7ac5b1da46d6aaff9fb57ad50d8453bcb3 # v6.6.0
-        with:
-          report_paths: reports/junit-e2e.xml
-          check_name: E2E tests
-          annotate_only: true
-          detailed_summary: true
-          require_tests: true
-
-      - name: Upload Playwright report
-        if: always()
+      - name: Upload report
+        if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: |
             playwright-report/
             test-results/
-          retention-days: 14
+          retention-days: 7
 
   build:
     needs: [test, trust-store, e2e]

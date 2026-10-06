@@ -6,9 +6,7 @@ module.exports = defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI
-    ? [["list"], ["html", { open: "never" }], ["junit", { outputFile: "reports/junit-e2e.xml" }]]
-    : "list",
+  reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
   use: {
     // Fixed zone so start times and day boundaries are deterministic
     timezoneId: "Europe/Berlin",

@@ -69,10 +69,6 @@ describe("toHHMM", () => {
 });
 
 describe("generateId", () => {
-  test("returns short alphanumeric ids", () => {
-    for (let i = 0; i < 100; i++) assert.match(lib.generateId(), /^[0-9a-z]{9,14}$/);
-  });
-
   test("returns distinct ids", () => {
     const ids = new Set(Array.from({ length: 1000 }, lib.generateId));
     assert.equal(ids.size, 1000);

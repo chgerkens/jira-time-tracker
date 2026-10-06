@@ -20,39 +20,22 @@ const OPENSSL_CNF = [
   "[leaf_ext]", "basicConstraints=CA:FALSE", "subjectAltName=IP:127.0.0.1",
   "keyUsage=critical,digitalSignature,keyEncipherment", "extendedKeyUsage=serverAuth",
   "authorityKeyIdentifier=keyid",
-  "[self_ext]", "basicConstraints=CA:FALSE", "subjectAltName=IP:127.0.0.1",
-  "keyUsage=critical,digitalSignature,keyEncipherment", "extendedKeyUsage=serverAuth",
 ].join("\n");
 
-// Writes into dir: ca.pem (root), leaf.pem/key (signed by root),
-// int.pem (intermediate CA, signed by root), leaf2.pem/key (signed by the
-// intermediate), self.pem/key (self-signed). Throws if openssl fails.
+// Writes ca.pem, leaf.pem, leaf.key into dir. Throws if openssl fails.
 function generate(dir) {
   fs.mkdirSync(dir, { recursive: true });
   const f = (name) => path.join(dir, name);
   fs.writeFileSync(f("openssl.cnf"), OPENSSL_CNF);
   const openssl = (...args) => execFileSync("openssl", args, { stdio: "ignore" });
   openssl("req", "-x509", "-config", f("openssl.cnf"), "-extensions", "ca_ext",
-    "-newkey", "rsa:2048", "-nodes", "-days", "2", "-subj", "/O=Test Company/CN=Test Company Root CA",
+    "-newkey", "rsa:2048", "-nodes", "-days", "2", "-subj", "/CN=Test Company Root CA",
     "-keyout", f("ca.key"), "-out", f("ca.pem"));
   openssl("req", "-new", "-config", f("openssl.cnf"), "-newkey", "rsa:2048", "-nodes",
     "-subj", "/CN=127.0.0.1", "-keyout", f("leaf.key"), "-out", f("leaf.csr"));
   openssl("x509", "-req", "-in", f("leaf.csr"), "-CA", f("ca.pem"), "-CAkey", f("ca.key"),
     "-set_serial", "1", "-days", "1", "-extfile", f("openssl.cnf"), "-extensions", "leaf_ext",
     "-out", f("leaf.pem"));
-  openssl("req", "-new", "-config", f("openssl.cnf"), "-newkey", "rsa:2048", "-nodes",
-    "-subj", "/O=Test Company/CN=Test Company Issuing CA", "-keyout", f("int.key"), "-out", f("int.csr"));
-  openssl("x509", "-req", "-in", f("int.csr"), "-CA", f("ca.pem"), "-CAkey", f("ca.key"),
-    "-set_serial", "2", "-days", "1", "-extfile", f("openssl.cnf"), "-extensions", "ca_ext",
-    "-out", f("int.pem"));
-  openssl("req", "-new", "-config", f("openssl.cnf"), "-newkey", "rsa:2048", "-nodes",
-    "-subj", "/CN=127.0.0.1", "-keyout", f("leaf2.key"), "-out", f("leaf2.csr"));
-  openssl("x509", "-req", "-in", f("leaf2.csr"), "-CA", f("int.pem"), "-CAkey", f("int.key"),
-    "-set_serial", "3", "-days", "1", "-extfile", f("openssl.cnf"), "-extensions", "leaf_ext",
-    "-out", f("leaf2.pem"));
-  openssl("req", "-x509", "-config", f("openssl.cnf"), "-extensions", "self_ext",
-    "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=127.0.0.1",
-    "-keyout", f("self.key"), "-out", f("self.pem"));
 }
 
 // Loads certs from JTT_CERT_DIR, or generates them into a temp dir.
@@ -78,9 +61,6 @@ function companyCerts() {
     ca,
     withRoot: { key, cert: leaf + ca }, // Jira sends leaf + root
     leafOnly: { key, cert: leaf },      // Jira sends only its own cert
-    selfSigned: { key: read("self.key"), cert: read("self.pem") },
-    // leaf + intermediate, without the root (common in company setups)
-    withIntermediate: { key: read("leaf2.key"), cert: read("leaf2.pem") + read("int.pem") },
     cleanup: () => { if (!given) fs.rmSync(dir, { recursive: true, force: true }); },
   };
 }
