@@ -158,6 +158,19 @@ async function fetchMyWorklogs(settings, date) {
   return results;
 }
 
+const MY_ISSUES_RESOLVED_DAYS = 7;
+async function fetchMyIssues(settings) {
+  const jql = myIssuesJql(MY_ISSUES_RESOLVED_DAYS);
+  const data = await jiraFetch(settings, `/search?jql=${encodeURIComponent(jql)}&maxResults=50&fields=key,summary,status,issuetype,resolutiondate`);
+  return (data.issues || []).map(i => {
+    const resolved = i.fields.resolutiondate ? parseJiraDate(i.fields.resolutiondate) : null;
+    return {
+      key: i.key, summary: i.fields.summary, status: i.fields.status?.name, type: i.fields.issuetype?.name,
+      resolvedDay: resolved ? localDateKey(resolved) : null,
+    };
+  });
+}
+
 // ─── Styles ─────────────────────────────────────────────────────────
 const inputStyle = {
   padding: "12px 16px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)",
@@ -650,6 +663,78 @@ function ImportPanel({ settings, date, existingEntries, onImport, onClose }) {
   );
 }
 
+function MyIssuesPanel({ settings, onLogTime, onClose }) {
+  const [issues, setIssues] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      try { setIssues(await fetchMyIssues(settings)); }
+      catch (e) { setError(e.message); }
+      setLoading(false);
+    })();
+  }, []);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }} onClick={onClose}>
+      <div role="dialog" aria-label="My issues" onClick={e => e.stopPropagation()} style={{ background: "#1e293b", borderRadius: "18px", padding: "28px", border: "1px solid rgba(255,255,255,0.08)", maxWidth: "720px", width: "100%", maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 80px rgba(0,0,0,0.5)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px", flexShrink: 0 }}>
+          <div>
+            <h2 style={{ fontSize: "1.1rem", fontWeight: 700, color: "#f1f5f9" }}>My issues</h2>
+            <p style={{ fontSize: "0.78rem", color: "#64748b", marginTop: "4px" }}>
+              Assigned to you · unresolved or resolved in the last {MY_ISSUES_RESOLVED_DAYS} days{!loading && !error ? ` · ${issues.length} found` : ""}
+            </p>
+          </div>
+          <button onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", color: "#64748b", fontSize: "1.3rem", cursor: "pointer" }}>×</button>
+        </div>
+
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          {loading && <div style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
+            <div style={{ fontSize: "1.2rem", marginBottom: "8px" }}>⟳</div>
+            Loading issues from Jira...
+          </div>}
+
+          {error && <div style={{ padding: "16px", borderRadius: "10px", background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.2)", color: "#ef4444", fontSize: "0.85rem" }}>
+            Error: {error}
+          </div>}
+
+          {!loading && !error && issues.length === 0 && (
+            <div style={{ textAlign: "center", padding: "40px", color: "#475569", fontSize: "0.9rem" }}>
+              <div style={{ fontSize: "1.5rem", marginBottom: "8px", opacity: 0.4 }}>🎉</div>
+              No unresolved or recently resolved issues assigned to you.
+            </div>
+          )}
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+            {issues.map(issue => (
+              <div key={issue.key} data-testid="my-issue" style={{ display: "flex", alignItems: "center", gap: "10px", padding: "12px 14px", borderRadius: "10px", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", flexWrap: "wrap" }}>
+                {window.JIRA_BASE_URL ? (
+                  <a href={`${window.JIRA_BASE_URL}/browse/${issue.key}`} target="_blank" rel="noopener noreferrer" title="Open issue in Jira"
+                    style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "0.82rem", fontWeight: 600, color: "#22d3ee", minWidth: "90px", textDecoration: "none" }}
+                    onMouseOver={e => e.currentTarget.style.textDecoration = "underline"}
+                    onMouseOut={e => e.currentTarget.style.textDecoration = "none"}
+                  >{issue.key}</a>
+                ) : (
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "0.82rem", fontWeight: 600, color: "#22d3ee", minWidth: "90px" }}>{issue.key}</span>
+                )}
+                <div style={{ flex: 1, minWidth: "120px", fontSize: "0.8rem", color: "#94a3b8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={issue.summary}>{issue.summary}</div>
+                {issue.status && <span style={{ fontSize: "0.62rem", padding: "2px 8px", borderRadius: "10px", background: "rgba(255,255,255,0.06)", color: "#64748b", whiteSpace: "nowrap" }}>{issue.status}</span>}
+                {issue.resolvedDay && <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "0.72rem", whiteSpace: "nowrap", color: "#22c55e" }}>✓ resolved {issue.resolvedDay}</span>}
+                <button onClick={() => { onLogTime(issue); onClose(); }}
+                  style={{ background: "rgba(34,211,238,0.08)", border: "1px solid rgba(34,211,238,0.25)", borderRadius: "6px", padding: "5px 9px", cursor: "pointer", fontSize: "0.7rem", color: "#22d3ee", whiteSpace: "nowrap" }}
+                  onMouseOver={e => e.currentTarget.style.background = "rgba(34,211,238,0.16)"}
+                  onMouseOut={e => e.currentTarget.style.background = "rgba(34,211,238,0.08)"}
+                >+ Log time</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main App ───────────────────────────────────────────────────────
 function App() {
   const [entries, setEntries] = useState(() => loadData(STORAGE_KEY, {}));
@@ -676,6 +761,7 @@ function App() {
   const [tab, setTab] = useState("manual");
   const [showSettings, setShowSettings] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showMyIssues, setShowMyIssues] = useState(false);
   const [syncingAll, setSyncingAll] = useState(false);
   const [toast, setToast] = useState(null);
   const intervalRef = useRef(null);
@@ -865,6 +951,12 @@ function App() {
     showToast(`${count} worklog${count !== 1 ? "s" : ""} imported`);
   };
 
+  // Prefill the manual entry form with an issue from the "My issues" list
+  const logTimeOn = (issue) => {
+    setTab("manual");
+    setManualTicket(issue.key); setManualTicketSummary(issue.summary); setManualDesc(prev => prev || issue.summary);
+  };
+
   const dayEntries = entries[selectedDate] || [];
   const dayTotal = dayEntries.reduce((s, e) => s + e.seconds, 0);
   const unsyncedCount = dayEntries.filter(e => e.syncStatus !== "synced").length;
@@ -884,6 +976,7 @@ function App() {
       {toast && <div style={{ position: "fixed", top: "20px", left: "50%", transform: "translateX(-50%)", zIndex: 200, padding: "12px 24px", borderRadius: "12px", background: toast.type === "error" ? "rgba(239,68,68,0.95)" : "rgba(34,197,94,0.95)", color: "#fff", fontSize: "0.88rem", fontWeight: 500, boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "slide-in 0.3s ease" }}>{toast.msg}</div>}
       {showSettings && <SettingsPanel settings={settings} onSave={saveSettings_} onClose={() => setShowSettings(false)} />}
       {showImport && <ImportPanel settings={settings} date={selectedDate} existingEntries={dayEntries} onImport={importWorklogs} onClose={() => setShowImport(false)} />}
+      {showMyIssues && <MyIssuesPanel settings={settings} onLogTime={logTimeOn} onClose={() => setShowMyIssues(false)} />}
 
       <div style={{ minHeight: "100vh", background: "#0f172a", fontFamily: "'Outfit', sans-serif", color: "#e2e8f0", padding: "24px clamp(8px, 3vw, 64px)", overflowX: "hidden" }}>
         <div style={{ maxWidth: "1400px", margin: "0 auto", width: "100%" }}>
@@ -978,7 +1071,7 @@ function App() {
 
           {/* Day selector */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px", flexWrap: "wrap", gap: "10px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
               <input type="date" value={selectedDate} aria-label="Day" onChange={e => setSelectedDate(e.target.value)} style={{ ...monoInputStyle, padding: "8px 12px", fontSize: "0.85rem", colorScheme: "dark" }} />
               {selectedDate !== todayKey() && <button onClick={() => setSelectedDate(todayKey())} style={{ padding: "8px 12px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "8px", color: "#64748b", fontSize: "0.8rem", cursor: "pointer" }}>Today</button>}
               {jiraConnected && <button onClick={() => setShowImport(true)} style={{
@@ -991,6 +1084,15 @@ function App() {
               onMouseOver={e => { e.currentTarget.style.background = "rgba(59,130,246,0.15)"; e.currentTarget.style.borderColor = "rgba(59,130,246,0.4)"; }}
               onMouseOut={e => { e.currentTarget.style.background = "rgba(59,130,246,0.08)"; e.currentTarget.style.borderColor = "rgba(59,130,246,0.25)"; }}
               >↓ Import</button>}
+              {jiraConnected && <button onClick={() => setShowMyIssues(true)} title="Issues assigned to me: unresolved or resolved in the last week" style={{
+                padding: "8px 14px", borderRadius: "8px",
+                border: "1px solid rgba(245,158,11,0.25)", background: "rgba(245,158,11,0.08)",
+                color: "#f59e0b", fontSize: "0.8rem", fontWeight: 500, cursor: "pointer",
+                transition: "all 0.2s",
+              }}
+              onMouseOver={e => { e.currentTarget.style.background = "rgba(245,158,11,0.15)"; e.currentTarget.style.borderColor = "rgba(245,158,11,0.4)"; }}
+              onMouseOut={e => { e.currentTarget.style.background = "rgba(245,158,11,0.08)"; e.currentTarget.style.borderColor = "rgba(245,158,11,0.25)"; }}
+              >📌 My issues</button>}
             </div>
             {dayEntries.length > 0 && <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "0.9rem", fontWeight: 600, color: "#22d3ee" }}>Σ {formatHM(dayTotal)}</span>}
           </div>

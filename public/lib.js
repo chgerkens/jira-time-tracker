@@ -78,11 +78,24 @@ function buildStartedISO(startTime, day) {
   }
   return new Date(day + "T12:00:00.000+0000").toISOString().replace("Z", "+0000");
 }
+// Jira timestamps end in "+0200"; ISO needs "+02:00" (V8 accepts both, older Safari doesn't)
+function jiraDateToISO(str) {
+  return String(str).replace(/([+-]\d{2})(\d{2})$/, "$1:$2");
+}
+function parseJiraDate(str) {
+  const d = new Date(jiraDateToISO(str));
+  return isNaN(d.getTime()) ? null : d;
+}
+// Issues assigned to me that are unresolved or were resolved in the last `days` days
+function myIssuesJql(days) {
+  return `assignee = currentUser() AND (resolution = Unresolved OR resolved >= -${days}d) ORDER BY updated DESC`;
+}
 
 // Stryker disable next-line all: only false in the browser, which the unit tests don't run in
 if (typeof module !== "undefined") {
   module.exports = {
     formatDuration, formatHM, toJiraFormat, localDateKey, todayKey, generateId,
     toHHMM, isoWeekKey, weekDays, weekHoursTSV, calcEndTime, buildStartedISO,
+    jiraDateToISO, parseJiraDate, myIssuesJql,
   };
 }

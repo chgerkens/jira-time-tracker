@@ -6,9 +6,8 @@
 
 const base = require("@playwright/test");
 const { startApp } = require("../test/helpers");
-const { startJira, PAT } = require("./fake-jira");
+const { startJira, PAT, NOW } = require("./fake-jira");
 
-const NOW = new Date("2026-10-07T09:00:00+02:00");
 const TODAY = "2026-10-07";
 
 const test = base.test.extend({

@@ -5,7 +5,7 @@ Local Jira time tracker for Jira Server/Data Center.
 ## Architecture
 
 - **`server.js`** — Node.js server (zero dependencies), serves the web app on `/` and proxies `/rest/*` to the configured Jira server. Strips Origin/Referer headers and sets XSRF bypass headers.
-- **`public/lib.js`** — Pure date/time helpers (plain JS, no JSX). Loaded by `index.html` as a classic script (globals) and `require`d by the unit tests. Put testable logic here.
+- **`public/lib.js`** — Pure helpers (date/time, Jira date parsing, JQL) (plain JS, no JSX). Loaded by `index.html` as a classic script (globals) and `require`d by the unit tests. Put testable logic here.
 - **`test/`** — `node:test` suites (`npm test`, no install needed): `lib.test.js` (helpers, run across several time zones), `server.test.js` (spawns `server.js` against a fake Jira; proxy, request guard, cookies, binding, TLS). `helpers.js` is shared with the e2e tests.
 - **`e2e/`** — Playwright browser tests (`npm run test:e2e`) against a stateful fake Jira (`fake-jira.js`). Fixed clock (Wed 2026-10-07 09:00) and time zone (Europe/Berlin). Locate inputs via their `aria-label`s and entries via `data-testid="entry"`.
 - **`public/index.html`** — Single-file React app (React 18 via CDN + Babel Standalone). All UI, state management, and Jira API logic in one file.
@@ -32,6 +32,7 @@ Local Jira time tracker for Jira Server/Data Center.
 - Manual sync: worklogs are only pushed to Jira on explicit "Push" action
 - Bulk sync: "Push all to Jira" button for unsynced entries
 - Import: load existing worklogs for a day from Jira
+- My issues: issues assigned to me that are unresolved or resolved in the last 7 days (`myIssuesJql` in `lib.js`, `MY_ISSUES_RESOLVED_DAYS` in `index.html`), recently updated first, with resolution day and "+ Log time" to prefill the manual form. The e2e fake Jira evaluates this exact JQL against its fixed `NOW`.
 - Favorite tickets with autocomplete
 - Calendar-sheet history view grouped by ISO week with weekly hour totals
 - Copy week hours: tab-separated decimal hours per day (Mon–Fri), comma as decimal separator

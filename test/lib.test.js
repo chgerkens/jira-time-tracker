@@ -247,3 +247,52 @@ describe("buildStartedISO", () => {
     }
   });
 });
+
+// ─── My issues ──────────────────────────────────────────────────────
+
+describe("jiraDateToISO", () => {
+  test("adds the colon to Jira's UTC offset", () => {
+    assert.equal(lib.jiraDateToISO("2026-09-01T10:00:00.000+0200"), "2026-09-01T10:00:00.000+02:00");
+    assert.equal(lib.jiraDateToISO("2026-09-01T10:00:00.000-0530"), "2026-09-01T10:00:00.000-05:30");
+  });
+
+  test("leaves other strings alone", () => {
+    assert.equal(lib.jiraDateToISO("2026-09-01T10:00:00.000Z"), "2026-09-01T10:00:00.000Z");
+    assert.equal(lib.jiraDateToISO("2026-09-01T10:00:00+02:00"), "2026-09-01T10:00:00+02:00");
+    assert.equal(lib.jiraDateToISO("+0200 2026"), "+0200 2026");   // offset only at the end
+    assert.equal(lib.jiraDateToISO("2026-09-01 1200"), "2026-09-01 1200"); // needs a sign
+    assert.equal(lib.jiraDateToISO("T10:00+020"), "T10:00+020");   // needs four digits
+    assert.equal(lib.jiraDateToISO("T10:00+ab00"), "T10:00+ab00");
+    assert.equal(lib.jiraDateToISO("T10:00+02ab"), "T10:00+02ab");
+  });
+});
+
+describe("parseJiraDate", () => {
+  test("reads Jira's offset format in every time zone", () => {
+    for (const tz of ZONES) {
+      inTZ(tz, () => {
+        assert.equal(lib.parseJiraDate("2026-09-01T10:00:00.000+0200").toISOString(), "2026-09-01T08:00:00.000Z", tz);
+        assert.equal(lib.parseJiraDate("2026-09-01T10:00:00.000-0530").toISOString(), "2026-09-01T15:30:00.000Z", tz);
+        assert.equal(lib.parseJiraDate("2026-09-01T10:00:00.000+0000").toISOString(), "2026-09-01T10:00:00.000Z", tz);
+      });
+    }
+  });
+
+  test("keeps already valid ISO strings", () => {
+    assert.equal(lib.parseJiraDate("2026-09-01T10:00:00.000Z").toISOString(), "2026-09-01T10:00:00.000Z");
+    assert.equal(lib.parseJiraDate("2026-09-01T10:00:00+02:00").toISOString(), "2026-09-01T08:00:00.000Z");
+  });
+
+  test("returns null for missing or invalid dates", () => {
+    assert.equal(lib.parseJiraDate(undefined), null);
+    assert.equal(lib.parseJiraDate(""), null);
+    assert.equal(lib.parseJiraDate("yesterday"), null);
+  });
+});
+
+describe("myIssuesJql", () => {
+  test("finds my unresolved issues and those resolved in the last days, recently updated first", () => {
+    assert.equal(lib.myIssuesJql(7),
+      "assignee = currentUser() AND (resolution = Unresolved OR resolved >= -7d) ORDER BY updated DESC");
+  });
+});
