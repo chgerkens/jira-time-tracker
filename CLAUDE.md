@@ -25,14 +25,14 @@ Local Jira time tracker for Jira Server/Data Center.
 ## Features
 
 - Manual time entry (default tab) and timer mode
-- Live ticket search via JQL with issue summary displayed
+- Live ticket search via JQL with issue summary displayed; picking an issue fills the description with its summary unless the user typed their own (`autofillDesc`)
 - Issue summary shown next to ticket key in entry list
 - Editable entries: ticket, description, start time, hours/minutes — sync status resets on change
 - Optional start time for entries, end time auto-calculated
 - Manual sync: worklogs are only pushed to Jira on explicit "Push" action
 - Bulk sync: "Push all to Jira" button for unsynced entries
 - Import: load existing worklogs for a day from Jira
-- My issues: issues assigned to me that are unresolved or resolved in the last 7 days (`myIssuesJql` in `lib.js`, `MY_ISSUES_RESOLVED_DAYS` in `index.html`), recently updated first, with resolution day and "+ Log time" to prefill the manual form. The e2e fake Jira evaluates this exact JQL against its fixed `NOW`.
+- My issues: issues assigned to me that are unresolved or resolved in the last 7 days (`myIssuesJql` in `lib.js`, `MY_ISSUES_RESOLVED_DAYS` in `index.html`), recently updated first, with resolution day and "+ Log time" to prefill the manual form. Also suggested in the `TicketInput` dropdown while the field is empty (cached 60 s per input). The e2e fake Jira evaluates this exact JQL against its fixed `NOW`.
 - Favorite tickets with autocomplete
 - Calendar-sheet history view grouped by ISO week with weekly hour totals
 - Copy week hours: tab-separated decimal hours per day (Mon–Fri), comma as decimal separator

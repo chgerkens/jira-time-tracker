@@ -48,6 +48,26 @@ test.describe("my issues", () => {
     expect(entry).toMatchObject({ ticket: "ABC-4", issueSummary: "Upgrade database", description: "Upgrade database", seconds: 3600 });
   });
 
+  test("Log time on another issue replaces the auto-filled description, not a typed one", async ({ page, open }) => {
+    await open();
+    const logTime = async (key) => {
+      await myIssues(page).click();
+      await page.getByTestId("my-issue").filter({ hasText: key }).getByRole("button", { name: "+ Log time" }).click();
+    };
+    const description = page.getByLabel("Description").first();
+
+    await logTime("ABC-4");
+    await expect(description).toHaveValue("Upgrade database");
+    await logTime("ABC-2");
+    await expect(page.getByLabel("Ticket").first()).toHaveValue("ABC-2");
+    await expect(description).toHaveValue("Write docs");
+
+    await description.fill("Review");
+    await logTime("ABC-3");
+    await expect(page.getByLabel("Ticket").first()).toHaveValue("ABC-3");
+    await expect(description).toHaveValue("Review");
+  });
+
   test("shows an empty state", async ({ page, open, jira }) => {
     const handler = jira.handler;
     jira.handler = (req, res, record) => {
@@ -72,8 +92,52 @@ test.describe("my issues", () => {
     await expect(page.getByText(/Error: HTTP 400 .*resolved/)).toBeVisible();
   });
 
+  test("the empty Ticket field suggests my issues", async ({ page, open, jira }) => {
+    await open();
+    const ticket = page.getByLabel("Ticket").first();
+    const suggestions = page.getByTestId("issue-suggestion");
+
+    await ticket.click();
+    await expect(page.getByText("📌 My issues", { exact: true })).toBeVisible();
+    await expect(suggestions).toHaveCount(3);
+    await expect(suggestions.nth(0)).toContainText("ABC-2");
+    await expect(suggestions.nth(1)).toContainText("✓ 2026-10-06");
+
+    await suggestions.filter({ hasText: "ABC-4" }).click();
+    await expect(ticket).toHaveValue("ABC-4");
+    await expect(page.getByLabel("Description").first()).toHaveValue("Upgrade database");
+
+    // typing replaces the suggestions with the search; clearing brings them back without a new request
+    await ticket.fill("login");
+    await expect(suggestions).toHaveCount(1);
+    await expect(suggestions).toContainText("ABC-1");
+    await ticket.fill("");
+    await expect(suggestions).toHaveCount(3);
+    const myIssueSearches = jira.requests.filter((r) => r.url.includes("assignee"));
+    expect(myIssueSearches).toHaveLength(1);
+  });
+
+  test("the Ticket field works without suggestions when the lookup fails", async ({ page, open, jira }) => {
+    const handler = jira.handler;
+    jira.handler = (req, res, record) => {
+      if (req.url.includes("assignee")) {
+        res.writeHead(500);
+        return res.end();
+      }
+      handler(req, res, record);
+    };
+    await open();
+    await page.getByLabel("Ticket").first().click();
+    await expect.poll(() => jira.requests.some((r) => r.url.includes("assignee"))).toBe(true);
+    await expect(page.getByTestId("issue-suggestion")).toHaveCount(0);
+    await page.getByLabel("Ticket").first().fill("login");
+    await expect(page.getByTestId("issue-suggestion")).toContainText("ABC-1");
+  });
+
   test("is hidden when not connected", async ({ page, open }) => {
     await open({ connected: false });
     await expect(myIssues(page)).toHaveCount(0);
+    await page.getByLabel("Ticket").first().click();
+    await expect(page.getByTestId("issue-suggestion")).toHaveCount(0);
   });
 });

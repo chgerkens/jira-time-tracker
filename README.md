@@ -28,7 +28,7 @@ From a clone: `node server.js https://jira.your-company.com`.
 - **Editable entries** — Change ticket, description, start time, and duration after creation
 - **Manual Jira sync** — Push individual entries or all at once; nothing is sent automatically
 - **Import** — Load existing worklogs for a day from Jira
-- **My issues** — Your assigned Jira issues that are unresolved or were resolved in the last week; log time on them with one click
+- **My issues** — Your assigned Jira issues that are unresolved or were resolved in the last week, suggested when you click into the empty Ticket field and listed under 📌 My issues
 - **Ticket search** — Live search via JQL with issue summary displayed
 - **Issue summary** — Jira issue title shown next to ticket key in the entry list
 - **Favorites** — Save frequently used tickets with autocomplete
@@ -42,9 +42,14 @@ From a clone: `node server.js https://jira.your-company.com`.
 
 ## My issues
 
-Click **📌 My issues** (next to Import, visible once Jira is connected) to list the issues assigned to you that are **unresolved** or were **resolved within the last 7 days** — the issues you're most likely to book time on. The most recently updated come first. Each row shows the issue key (linked to Jira), summary, status and, for resolved issues, the day they were resolved. **+ Log time** fills the manual entry form with the issue key and summary.
+The issues assigned to you that are **unresolved** or were **resolved within the last 7 days** — the ones you're most likely to book time on, including a few days after they're closed. The most recently updated come first. There are two ways to get to them:
 
-The list uses this JQL, so you can reproduce it in Jira's issue search:
+- **Ticket field:** click into the empty field and they're offered as suggestions. Pick one to fill in the ticket and description; start typing to search Jira instead. The suggestions are refreshed at most once a minute.
+- **📌 My issues** (next to Import, visible once Jira is connected): a list with the issue key (linked to Jira), summary, status and, for resolved issues, the day they were resolved. **+ Log time** fills the manual entry form with the issue key and summary.
+
+Picking an issue replaces a description that was filled in from another issue's summary, but keeps a description you typed yourself.
+
+Both use this JQL, so you can reproduce the list in Jira's issue search:
 
 ```
 assignee = currentUser() AND (resolution = Unresolved OR resolved >= -7d) ORDER BY updated DESC
