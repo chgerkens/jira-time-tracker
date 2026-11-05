@@ -159,16 +159,23 @@ async function fetchMyWorklogs(settings, date) {
 }
 
 const MY_ISSUES_RESOLVED_DAYS = 7;
+const MY_ISSUES_MAX = 50;
+// → { issues, total }; total counts all matches, issues holds at most MY_ISSUES_MAX
 async function fetchMyIssues(settings) {
   const jql = myIssuesJql(MY_ISSUES_RESOLVED_DAYS);
-  const data = await jiraFetch(settings, `/search?jql=${encodeURIComponent(jql)}&maxResults=50&fields=key,summary,status,issuetype,resolutiondate`);
-  return (data.issues || []).map(i => {
+  const data = await jiraFetch(settings, `/search?jql=${encodeURIComponent(jql)}&maxResults=${MY_ISSUES_MAX}&fields=key,summary,status,issuetype,resolutiondate`);
+  const issues = (data.issues || []).map(i => {
     const resolved = i.fields.resolutiondate ? parseJiraDate(i.fields.resolutiondate) : null;
     return {
       key: i.key, summary: i.fields.summary, status: i.fields.status?.name, type: i.fields.issuetype?.name,
       resolvedDay: resolved ? localDateKey(resolved) : null,
     };
   });
+  return { issues, total: Math.max(data.total ?? 0, issues.length) };
+}
+// "3 found" or "50 of 63" when Jira returned only the first page
+function foundLabel({ issues, total }) {
+  return total > issues.length ? `showing ${issues.length} of ${total}` : `${issues.length} found`;
 }
 
 // ─── Styles ─────────────────────────────────────────────────────────
@@ -212,7 +219,7 @@ function TicketInput({ value, onChange, onSubmit, placeholder, favorites, onSele
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [jiraResults, setJiraResults] = useState([]);
   const [searching, setSearching] = useState(false);
-  const [myIssues, setMyIssues] = useState([]);
+  const [myIssues, setMyIssues] = useState({ issues: [], total: 0 });
   const debounceRef = useRef(null);
   const blurRef = useRef(null);
   const myIssuesFetchedRef = useRef(0);
@@ -238,7 +245,7 @@ function TicketInput({ value, onChange, onSubmit, placeholder, favorites, onSele
   }, [value, connected]);
 
   const favFiltered = favorites.filter(f => f.toLowerCase().includes(value.toLowerCase()) && value.length > 0);
-  const myIssuesShown = connected && value === "" ? myIssues : [];
+  const myIssuesShown = connected && value === "" ? myIssues.issues : [];
   const hasResults = favFiltered.length > 0 || jiraResults.length > 0 || searching || myIssuesShown.length > 0;
   const select = (t) => { onSelectJira ? onSelectJira(t) : onSelectFavorite(t.key); setShowSuggestions(false); };
 
@@ -267,7 +274,7 @@ function TicketInput({ value, onChange, onSubmit, placeholder, favorites, onSele
           boxShadow: "0 12px 40px rgba(0,0,0,0.4)",
         }}>
           {myIssuesShown.length > 0 && <>
-            <div style={{ padding: "8px 14px 4px", fontSize: "0.65rem", color: "#475569", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 600 }}>📌 My issues</div>
+            <div style={{ padding: "8px 14px 4px", fontSize: "0.65rem", color: "#475569", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 600 }}>📌 My issues{myIssues.total > myIssues.issues.length ? ` · ${foundLabel(myIssues)}` : ""}</div>
             {myIssuesShown.map(t => <IssueSuggestion key={`my-${t.key}`} issue={t} onSelect={select} />)}
           </>}
           {favFiltered.length > 0 && <>
@@ -686,13 +693,14 @@ function ImportPanel({ settings, date, existingEntries, onImport, onClose }) {
 }
 
 function MyIssuesPanel({ settings, onLogTime, onClose }) {
-  const [issues, setIssues] = useState([]);
+  const [result, setResult] = useState({ issues: [], total: 0 });
+  const { issues } = result;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     (async () => {
-      try { setIssues(await fetchMyIssues(settings)); }
+      try { setResult(await fetchMyIssues(settings)); }
       catch (e) { setError(e.message); }
       setLoading(false);
     })();
@@ -705,7 +713,7 @@ function MyIssuesPanel({ settings, onLogTime, onClose }) {
           <div>
             <h2 style={{ fontSize: "1.1rem", fontWeight: 700, color: "#f1f5f9" }}>My issues</h2>
             <p style={{ fontSize: "0.78rem", color: "#64748b", marginTop: "4px" }}>
-              Assigned to you · unresolved or resolved in the last {MY_ISSUES_RESOLVED_DAYS} days{!loading && !error ? ` · ${issues.length} found` : ""}
+              Assigned to you · unresolved or resolved in the last {MY_ISSUES_RESOLVED_DAYS} days{!loading && !error ? ` · ${foundLabel(result)}` : ""}
             </p>
           </div>
           <button onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", color: "#64748b", fontSize: "1.3rem", cursor: "pointer" }}>×</button>

@@ -80,7 +80,7 @@ async function startJira() {
         )
       );
     }
-    return { issues: keys.map(issueJson) };
+    return { total: keys.length, issues: keys.map(issueJson) };
   }
 
   jira.handler = (req, res, record) => {

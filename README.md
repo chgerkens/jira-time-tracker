@@ -55,7 +55,7 @@ Both use this JQL, so you can reproduce the list in Jira's issue search:
 assignee = currentUser() AND (resolution = Unresolved OR resolved >= -7d) ORDER BY updated DESC
 ```
 
-At most 50 issues are shown.
+At most 50 issues are shown; if more match, the list says so (e.g. "showing 50 of 63").
 
 ## Why a proxy?
 

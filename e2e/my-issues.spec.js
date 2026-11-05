@@ -68,6 +68,26 @@ test.describe("my issues", () => {
     await expect(description).toHaveValue("Review");
   });
 
+  test("says when Jira returned only the first issues", async ({ page, open, jira }) => {
+    const handler = jira.handler;
+    jira.handler = (req, res, record) => {
+      if (req.url.includes("assignee")) {
+        expect(new URL(req.url, "http://jira").searchParams.get("maxResults")).toBe("50");
+        res.writeHead(200, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ total: 63, issues: [
+          { key: "ABC-2", fields: { summary: "Write docs", status: { name: "To Do" } } },
+        ] }));
+      }
+      handler(req, res, record);
+    };
+    await open();
+    await page.getByLabel("Ticket").first().click();
+    await expect(page.getByText("📌 My issues · showing 1 of 63")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await myIssues(page).click();
+    await expect(page.getByRole("dialog", { name: "My issues" })).toContainText("showing 1 of 63");
+  });
+
   test("shows an empty state", async ({ page, open, jira }) => {
     const handler = jira.handler;
     jira.handler = (req, res, record) => {
