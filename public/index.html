@@ -1086,12 +1086,12 @@ function App() {
               >↓ Import</button>}
               {jiraConnected && <button onClick={() => setShowMyIssues(true)} title="Issues assigned to me: unresolved or resolved in the last week" style={{
                 padding: "8px 14px", borderRadius: "8px",
-                border: "1px solid rgba(245,158,11,0.25)", background: "rgba(245,158,11,0.08)",
-                color: "#f59e0b", fontSize: "0.8rem", fontWeight: 500, cursor: "pointer",
+                border: "1px solid rgba(59,130,246,0.25)", background: "rgba(59,130,246,0.08)",
+                color: "#3b82f6", fontSize: "0.8rem", fontWeight: 500, cursor: "pointer",
                 transition: "all 0.2s",
               }}
-              onMouseOver={e => { e.currentTarget.style.background = "rgba(245,158,11,0.15)"; e.currentTarget.style.borderColor = "rgba(245,158,11,0.4)"; }}
-              onMouseOut={e => { e.currentTarget.style.background = "rgba(245,158,11,0.08)"; e.currentTarget.style.borderColor = "rgba(245,158,11,0.25)"; }}
+              onMouseOver={e => { e.currentTarget.style.background = "rgba(59,130,246,0.15)"; e.currentTarget.style.borderColor = "rgba(59,130,246,0.4)"; }}
+              onMouseOut={e => { e.currentTarget.style.background = "rgba(59,130,246,0.08)"; e.currentTarget.style.borderColor = "rgba(59,130,246,0.25)"; }}
               >📌 My issues</button>}
             </div>
             {dayEntries.length > 0 && <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "0.9rem", fontWeight: 600, color: "#22d3ee" }}>Σ {formatHM(dayTotal)}</span>}
