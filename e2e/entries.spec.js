@@ -138,13 +138,34 @@ test.describe("ticket search and favorites", () => {
     await expect(page.getByTestId("entry").getByTitle("Fix login bug")).toBeVisible();
   });
 
+  test("picking another ticket replaces the auto-filled description, not a typed one", async ({ page, open }) => {
+    await open();
+    const ticket = page.getByLabel("Ticket").first();
+    const description = page.getByLabel("Description").first();
+    const pick = async (query, summary) => {
+      await ticket.fill(query);
+      await page.getByText(summary).click();
+    };
+
+    await pick("login", "Fix login bug");
+    await expect(description).toHaveValue("Fix login bug");
+    await pick("docs", "Write docs");
+    await expect(ticket).toHaveValue("ABC-2");
+    await expect(description).toHaveValue("Write docs");
+
+    await description.fill("Review");
+    await pick("login", "Fix login bug");
+    await expect(ticket).toHaveValue("ABC-1");
+    await expect(description).toHaveValue("Review");
+  });
+
   test("a project prefix lists that project's tickets", async ({ page, open, jira }) => {
     await open();
     await page.getByLabel("Ticket").first().fill("ABC-");
     await expect(page.getByText("Write docs")).toBeVisible();
     await expect(page.getByText("Fix login bug")).toBeVisible();
     await expect(page.getByText("Release 2.0")).toHaveCount(0);
-    const search = jira.requests.find((r) => r.url.startsWith("/rest/api/2/search"));
+    const search = jira.requests.find((r) => r.url.startsWith("/rest/api/2/search") && r.url.includes("project"));
     expect(new URL(search.url, "http://x").searchParams.get("jql")).toBe('project = "ABC" ORDER BY updated DESC');
   });
 

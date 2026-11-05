@@ -28,6 +28,7 @@ From a clone: `node server.js https://jira.your-company.com`.
 - **Editable entries** — Change ticket, description, start time, and duration after creation
 - **Manual Jira sync** — Push individual entries or all at once; nothing is sent automatically
 - **Import** — Load existing worklogs for a day from Jira
+- **My issues** — Your assigned Jira issues that are unresolved or were resolved in the last week, suggested when you click into the empty Ticket field and listed under 📌 My issues
 - **Ticket search** — Live search via JQL with issue summary displayed
 - **Issue summary** — Jira issue title shown next to ticket key in the entry list
 - **Favorites** — Save frequently used tickets with autocomplete
@@ -38,6 +39,23 @@ From a clone: `node server.js https://jira.your-company.com`.
 - **15-min increments** — Minute spinners step in quarter-hour intervals
 - **Sync status** — Visible per entry (Local / ✓ Jira / ✗ Error) with retry; resets on edit
 - **Responsive layout** — Adapts padding and card sizes to any window width
+
+## My issues
+
+The issues assigned to you that are **unresolved** or were **resolved within the last 7 days** — the ones you're most likely to book time on, including a few days after they're closed. The most recently updated come first. There are two ways to get to them:
+
+- **Ticket field:** click into the empty field and they're offered as suggestions. Pick one to fill in the ticket and description; start typing to search Jira instead. The suggestions are refreshed at most once a minute.
+- **📌 My issues** (next to Import, visible once Jira is connected): a list with the issue key (linked to Jira), summary, status and, for resolved issues, the day they were resolved. **+ Log time** fills the manual entry form with the issue key and summary.
+
+Picking an issue replaces a description that was filled in from another issue's summary, but keeps a description you typed yourself.
+
+Both use this JQL, so you can reproduce the list in Jira's issue search:
+
+```
+assignee = currentUser() AND (resolution = Unresolved OR resolved >= -7d) ORDER BY updated DESC
+```
+
+At most 50 issues are shown; if more match, the list says so (e.g. "showing 50 of 63").
 
 ## Why a proxy?
 
@@ -124,7 +142,7 @@ npm run test:e2e    # browser tests
 
 - **Unit tests** (`test/lib.test.js`) cover the date/time helpers in `public/lib.js` across several time zones, including DST switches and ISO week-year boundaries.
 - **Server tests** (`test/server.test.js`) start `server.js` in front of a fake Jira server and check the proxy, the request guard, cookie handling and TLS verification.
-- **E2E tests** (`e2e/`) drive the app in headless Chromium against a stateful fake Jira: entries, editing, search, favorites, push/update/delete of worklogs, import, timer and the copy buttons. They need internet access to load React and Babel from the CDN.
+- **E2E tests** (`e2e/`) drive the app in headless Chromium against a stateful fake Jira: entries, editing, search, favorites, push/update/delete of worklogs, import, my issues, timer and the copy buttons. They need internet access to load React and Babel from the CDN.
 
 The app itself still has no runtime dependencies; Playwright, c8 and Stryker are dev dependencies for testing only.
 
@@ -146,7 +164,7 @@ jira-time-tracker/
 ├── server.js          # Node.js server + Jira proxy
 ├── public/
 │   ├── index.html     # Single-file React app
-│   └── lib.js         # Pure date/time helpers (shared with the tests)
+│   └── lib.js         # Pure helpers: date/time, JQL (shared with the tests)
 ├── test/              # Unit + server tests (node:test, no dependencies)
 ├── e2e/               # Browser tests (Playwright) + stateful fake Jira
 ├── playwright.config.js

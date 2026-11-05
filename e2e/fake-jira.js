@@ -2,6 +2,8 @@
 //
 // Implements the slice of the Jira REST API v2 the app uses:
 // /myself, /search (JQL subset), and worklog CRUD on issues.
+// Relative JQL dates ("-7d") are evaluated against NOW, the clock the
+// browser gets in fixtures.js.
 // ────────────────────────────────────────────────────────────────────
 
 const { startFakeJira } = require("../test/helpers");
@@ -10,10 +12,19 @@ const PAT = "test-pat";
 const ME = { name: "jdoe", key: "jdoe", displayName: "Jane Doe" };
 const OTHER = { name: "msmith", key: "msmith", displayName: "Max Smith" };
 
+const NOW = new Date("2026-10-07T09:00:00+02:00");
+
 const ISSUES = {
-  "ABC-1": { summary: "Fix login bug", status: "In Progress", type: "Bug" },
-  "ABC-2": { summary: "Write docs", status: "To Do", type: "Task" },
-  "XYZ-7": { summary: "Release 2.0", status: "Done", type: "Story" },
+  "ABC-1": { summary: "Fix login bug", status: "In Progress", type: "Bug",
+    assignee: OTHER, updated: "2026-10-06T15:00:00.000+0200" },
+  "ABC-2": { summary: "Write docs", status: "To Do", type: "Task",
+    assignee: ME, updated: "2026-10-06T11:00:00.000+0200" },
+  "ABC-3": { summary: "Migrate CI pipeline", status: "In Progress", type: "Task",
+    assignee: ME, updated: "2026-09-01T10:00:00.000+0200" },
+  "ABC-4": { summary: "Upgrade database", status: "Done", type: "Task",
+    assignee: ME, updated: "2026-10-05T23:30:00.000+0000", resolutiondate: "2026-10-05T23:30:00.000+0000" },
+  "XYZ-7": { summary: "Release 2.0", status: "Done", type: "Story",
+    assignee: ME, updated: "2026-09-20T10:00:00.000+0200", resolutiondate: "2026-09-20T10:00:00.000+0200" },
 };
 
 async function startJira() {
@@ -40,13 +51,21 @@ async function startJira() {
       summary: ISSUES[key].summary,
       status: { name: ISSUES[key].status },
       issuetype: { name: ISSUES[key].type },
+      resolutiondate: ISSUES[key].resolutiondate ?? null,
     },
   });
 
   function search(jql) {
     let m;
     let keys = Object.keys(ISSUES);
-    if ((m = /key = "([^"]+)"/.exec(jql))) {
+    if ((m = /assignee = currentUser\(\) AND \(resolution = Unresolved OR resolved >= -(\d+)d\) ORDER BY updated DESC/.exec(jql))) {
+      const cutoff = NOW.getTime() - Number(m[1]) * 86400000;
+      const time = (d) => new Date(d.replace(/(\d{2})(\d{2})$/, "$1:$2")).getTime();
+      keys = keys
+        .filter((k) => ISSUES[k].assignee === ME)
+        .filter((k) => !ISSUES[k].resolutiondate || time(ISSUES[k].resolutiondate) >= cutoff)
+        .sort((a, b) => time(ISSUES[b].updated) - time(ISSUES[a].updated));
+    } else if ((m = /key = "([^"]+)"/.exec(jql))) {
       keys = keys.filter((k) => k === m[1]);
     } else if ((m = /project = "([^"]+)"/.exec(jql))) {
       keys = keys.filter((k) => k.startsWith(`${m[1]}-`));
@@ -61,7 +80,7 @@ async function startJira() {
         )
       );
     }
-    return { issues: keys.map(issueJson) };
+    return { total: keys.length, issues: keys.map(issueJson) };
   }
 
   jira.handler = (req, res, record) => {
@@ -124,4 +143,4 @@ async function startJira() {
   return jira;
 }
 
-module.exports = { startJira, PAT, ISSUES };
+module.exports = { startJira, PAT, ISSUES, NOW };
