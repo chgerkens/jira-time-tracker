@@ -12,7 +12,7 @@ Local Jira time tracker for Jira Server/Data Center.
 
 ## Technical Details
 
-- **Auth:** Bearer Token (Personal Access Token, requires Jira DC 8.14+) — stored only in browser localStorage, not on the server. PAT page: `/secure/ViewProfile.jspa#!/personal-access-tokens`
+- **Auth:** Bearer Token (Personal Access Token, requires Jira Server/DC 8.14+; Cloud untested) — stored only in browser localStorage, not on the server. PAT page: `/secure/ViewProfile.jspa#!/personal-access-tokens`
 - **API:** Jira REST API v2 (`/rest/api/2/*`)
 - **Storage:** Browser localStorage for entries, favorites, and settings
 - **Proxy:** Required due to XSRF validation on Jira Server/DC — browser requests from a different origin are rejected
@@ -49,6 +49,8 @@ node server.js https://jira.your-company.com 8080
 ```
 
 Then open `http://localhost:3001` and enter your PAT.
+
+**Dev server without a real Jira:** `npm run dev [PORT]` (`e2e/dev-server.js`, PAT `test-pat`; details in README → Development). Default port 3009, never 3001 — localStorage is per origin, so sharing the real tracker's port would mix real entries into the fake.
 
 Without a clone: `npx github:chgerkens/jira-time-tracker https://jira.your-company.com` (package `@chgerkens/jira-time-tracker`, command `jira-time-tracker` → `server.js`). Only the files in `package.json` → `files` are shipped (`server.js`, `public/`); **new runtime files must be added there** — `test/package.test.js` pins the exact list. The unscoped npm name `jira-time-tracker` belongs to someone else.
 

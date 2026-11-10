@@ -7,3 +7,4 @@ playwright-report/
 coverage/
 reports/
 .stryker-tmp/
+.claude/settings.local.json
