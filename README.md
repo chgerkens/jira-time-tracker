@@ -4,7 +4,7 @@ Local time tracker for **Jira Server / Data Center** with built-in proxy.
 
 ![Node.js](https://img.shields.io/badge/Node.js-≥22-green) ![Dependencies](https://img.shields.io/badge/Dependencies-0-blue) ![Auth](https://img.shields.io/badge/Auth-PAT%20(Bearer)-orange)
 
-![Jira Time Tracker Screenshot](jtt-screenshot.png)
+![Jira Time Tracker demo: connect with a PAT, log time from "My issues" and the ticket search, push the worklogs to Jira](docs/demo.gif)
 
 ## Quickstart
 
@@ -141,8 +141,6 @@ npm run dev         # or: npm run dev 8080
 This starts the fake Jira from the e2e tests and `server.js` in front of it (no install needed). Open `http://localhost:3009` and connect with the PAT `test-pat`. The fake has a few sample issues (`ABC-1` … `ABC-4`, `XYZ-7`). Worklogs you push live in memory only and are gone after a restart. "My issues" is evaluated against the fake's fixed date (2026-10-07), not today.
 
 The dev server deliberately doesn't use 3001 (and ignores `PORT`): the browser stores entries and the PAT per address, so on the same port as your real tracker it would show your real entries — and pushing them would mark them as synced without them ever reaching your Jira.
-
-![Dev server walkthrough: connect with test-pat, log time from "My issues" and the ticket search, push to the fake Jira](docs/dev-server.gif)
 
 ## Tests
 
