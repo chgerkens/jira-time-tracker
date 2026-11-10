@@ -34,6 +34,7 @@ From a clone: `node server.js https://jira.your-company.com`.
 - **Favorites** — Save frequently used tickets with autocomplete
 - **Calendar history** — Weekly calendar view grouped by ISO week with hour totals per day and week
 - **Copy tickets** — Copy all unique ticket keys for the day as a comma-separated list
+- **Copy all** — Copy the day's entries as text, one per line (`ABC-1: 1h 30m — description`)
 - **Copy week** — Export a week's hours as tab-separated decimals (comma separator) for pasting into spreadsheets
 - **Start & end time** — Optional start time per entry, end time auto-calculated
 - **15-min increments** — Minute spinners step in quarter-hour intervals
@@ -126,7 +127,7 @@ docker run -p 127.0.0.1:3001:3001 \
 2. Click **Create token**, give it a name, and copy the value
 3. Paste it in the app under ⚙️ Settings
 
-> **Note:** PATs require Jira **Data Center** 8.14+. Jira Server (single-node) does not support PATs.
+> **Note:** PATs require Jira Server or Data Center **8.14+**. Jira Cloud hasn't been tested.
 
 The PAT is stored only in the browser (`localStorage`), not on the server.
 
@@ -153,7 +154,8 @@ npm run test:e2e    # browser tests
 ```
 
 - **Unit tests** (`test/lib.test.js`) cover the date/time helpers in `public/lib.js` across several time zones, including DST switches and ISO week-year boundaries.
-- **Server tests** (`test/server.test.js`) start `server.js` in front of a fake Jira server and check the proxy, the request guard, cookie handling and TLS verification.
+- **Server tests** (`test/server.test.js`) start `server.js` in front of a fake Jira server and check serving the app, the proxy, the request guard, cookie handling, network binding, startup/shutdown and TLS verification.
+- **Package test** (`test/package.test.js`) pins the files shipped via `npx` (`package.json` → `files`).
 - **E2E tests** (`e2e/`) drive the app in headless Chromium against a stateful fake Jira: entries, editing, search, favorites, push/update/delete of worklogs, import, my issues, timer and the copy buttons. They need internet access to load React and Babel from the CDN.
 
 The app itself still has no runtime dependencies; Playwright, c8 and Stryker are dev dependencies for testing only.
@@ -162,7 +164,7 @@ The app itself still has no runtime dependencies; Playwright, c8 and Stryker are
 
 ```bash
 npm run coverage    # unit + server tests with coverage (c8), fails below the thresholds in .c8rc.json
-npm run mutation    # mutation testing (Stryker, ~10 min), report in reports/mutation/index.html
+npm run mutation    # mutation testing (Stryker), report in reports/mutation/index.html
 ```
 
 - **Coverage** includes `server.js` running in child processes. UI code inside `index.html` is compiled in the browser and can't be measured — it's covered by the e2e tests, which is a good reason to move logic into `public/lib.js`.
@@ -177,9 +179,14 @@ jira-time-tracker/
 ├── public/
 │   ├── index.html     # Single-file React app
 │   └── lib.js         # Pure helpers: date/time, JQL (shared with the tests)
-├── test/              # Unit + server tests (node:test, no dependencies)
-├── e2e/               # Browser tests (Playwright) + stateful fake Jira
+├── test/              # Unit, server + package tests (node:test, no dependencies)
+├── e2e/               # Browser tests (Playwright), stateful fake Jira, dev server
+├── scripts/           # CI summaries for coverage and mutation testing
+├── docs/              # Demo GIF
+├── Dockerfile
 ├── playwright.config.js
+├── .c8rc.json         # Coverage thresholds
+├── stryker.config.json
 ├── package.json
 ├── CLAUDE.md          # Context for Claude Code
 └── README.md
